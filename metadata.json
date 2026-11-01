@@ -1,0 +1,6 @@
+{
+  "name": "Kothon",
+  "description": "WhisperFlow-style voice-to-text keyboard with real-time transcription, professional grammar refinement, and multilingual translation for Android.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

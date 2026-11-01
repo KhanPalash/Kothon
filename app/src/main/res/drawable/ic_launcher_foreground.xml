@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Microphone capsule with cyan-indigo gradient -->
+    <path
+        android:pathData="M48,34 C48,30.7 50.7,28 54,28 C57.3,28 60,30.7 60,34 L60,52 C60,55.3 57.3,58 54,58 C50.7,58 48,55.3 48,52 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="48"
+                android:startY="28"
+                android:endX="60"
+                android:endY="58"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#38BDF8" />
+                <item android:offset="1.0" android:color="#818CF8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Microphone cradle arc -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M42,48 C42,55.5 47.4,63 54,63 C60.6,63 66,55.5 66,48" />
+
+    <!-- Stem & Base -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,63 L54,74 M46,74 L62,74" />
+
+    <!-- Left Sound Wave Inner -->
+    <path
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M35,43 C33,48 33,54 35,59" />
+
+    <!-- Left Sound Wave Outer -->
+    <path
+        android:strokeColor="#818CF8"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M28,39 C25,47 25,55 28,63" />
+
+    <!-- Right Sound Wave Inner -->
+    <path
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M73,43 C75,48 75,54 73,59" />
+
+    <!-- Right Sound Wave Outer -->
+    <path
+        android:strokeColor="#818CF8"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M80,39 C83,47 83,55 80,63" />
+
+    <!-- AI Polish Sparkle at upper right -->
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M76,28 C76,25 78,23 81,23 C78,23 76,21 76,18 C76,21 74,23 71,23 C74,23 76,25 76,28 Z" />
+
+</vector>
