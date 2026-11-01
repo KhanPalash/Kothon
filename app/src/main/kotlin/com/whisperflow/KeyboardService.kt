@@ -66,6 +66,9 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     private lateinit var preferences: KothonPreferences
     private lateinit var recorder: Recorder
     private lateinit var transcriptionClient: TranscriptionClient
+    private lateinit var liveSpeechStreamer: com.whisperflow.audio.LiveSpeechStreamer
+    private var isComposingActive = false
+    private var lastComposingLength = 0
 
     // Keyboard UI Mode: false = Voice Mode, true = Standard QWERTY Fallback
     private val _isFallbackKeyboard = MutableStateFlow(false)
@@ -90,6 +93,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
         preferences = KothonPreferences(this)
         recorder = Recorder(this)
         transcriptionClient = TranscriptionClient(this)
+        liveSpeechStreamer = com.whisperflow.audio.LiveSpeechStreamer(this)
     }
 
     override fun onConfigureWindow(win: Window, isFullscreen: Boolean, isCandidatesOnly: Boolean) {
@@ -243,6 +247,30 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
             _buttonState.value = VoiceButtonState.RECORDING
             _statusMessage.value = "Listening... Speak in Bangla or English"
 
+            // Start live speech streaming for instantaneous typing feedback
+            isComposingActive = true
+            lastComposingLength = 0
+            liveSpeechStreamer.startListening(
+                languageCode = preferences.sourceLanguage,
+                onPartialText = { partial ->
+                    if (_buttonState.value == VoiceButtonState.RECORDING) {
+                        _statusMessage.value = partial
+                        currentInputConnection?.setComposingText(partial, 1)
+                        lastComposingLength = partial.length
+                    }
+                },
+                onFinalText = { finalText ->
+                    if (_buttonState.value == VoiceButtonState.RECORDING) {
+                        _statusMessage.value = finalText
+                        currentInputConnection?.setComposingText(finalText, 1)
+                        lastComposingLength = finalText.length
+                    }
+                },
+                onError = { err ->
+                    Log.d("KeyboardService", "Live speech streamer notice: $err")
+                }
+            )
+
             // Start amplitude polling
             startAmplitudePolling()
         } catch (e: Exception) {
@@ -261,11 +289,15 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
             return
         }
 
+        liveSpeechStreamer.stopListening()
+
         _buttonState.value = VoiceButtonState.PROCESSING
         _statusMessage.value = "Refining with AI & translating..."
 
         val recordedAudio = recorder.stop() ?: currentRecordingFile
         if (recordedAudio == null || !recordedAudio.exists() || recordedAudio.length() < 2500L) {
+            currentInputConnection?.finishComposingText()
+            isComposingActive = false
             _buttonState.value = VoiceButtonState.IDLE
             _statusMessage.value = "Speech too short. Tap to speak, then tap to stop."
             return
@@ -285,7 +317,17 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                 }
 
                 if (processedText.isNotBlank()) {
-                    commitTextToEditor(processedText)
+                    val inputConn = currentInputConnection
+                    if (inputConn != null) {
+                        if (isComposingActive && lastComposingLength > 0) {
+                            inputConn.finishComposingText()
+                            inputConn.deleteSurroundingText(lastComposingLength, 0)
+                        }
+                        inputConn.commitText(processedText, 1)
+                    }
+                    isComposingActive = false
+                    lastComposingLength = 0
+
                     _buttonState.value = VoiceButtonState.SUCCESS
                     _statusMessage.value = "Inserted: \"$processedText\""
 
@@ -296,11 +338,15 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                         _statusMessage.value = ""
                     }
                 } else {
+                    currentInputConnection?.finishComposingText()
+                    isComposingActive = false
                     _buttonState.value = VoiceButtonState.ERROR
                     _statusMessage.value = "Refinement produced empty text."
                 }
             } catch (e: IOException) {
                 Log.w("KeyboardService", "Transcription failed, falling back to keyboard", e)
+                currentInputConnection?.finishComposingText()
+                isComposingActive = false
                 _buttonState.value = VoiceButtonState.ERROR
                 _statusMessage.value = e.message ?: "Failed. Falling back to keyboard."
                 // Graceful fallback to standard keyboard layout
@@ -308,6 +354,8 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                 switchToFallbackKeyboard()
             } catch (e: Exception) {
                 Log.e("KeyboardService", "Unexpected processing error", e)
+                currentInputConnection?.finishComposingText()
+                isComposingActive = false
                 _buttonState.value = VoiceButtonState.ERROR
                 _statusMessage.value = "Error: ${e.localizedMessage}"
                 switchToFallbackKeyboard()
@@ -377,6 +425,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     }
 
     override fun onDestroy() {
+        liveSpeechStreamer.stopListening()
         recorder.cancel()
         serviceScope.cancel()
         store.clear()

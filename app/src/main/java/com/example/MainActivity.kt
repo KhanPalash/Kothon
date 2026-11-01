@@ -210,6 +210,8 @@ fun KothonAppScreen() {
     var fixGrammar by remember { mutableStateOf(preferences.fixGrammar) }
 
     // Audio & Dictation state
+    val liveSpeechStreamer = remember { com.whisperflow.audio.LiveSpeechStreamer(context) }
+    var liveStreamingText by remember { mutableStateOf("") }
     var isRecording by remember { mutableStateOf(false) }
     var isProcessing by remember { mutableStateOf(false) }
     var amplitude by remember { mutableFloatStateOf(0f) }
@@ -250,9 +252,25 @@ fun KothonAppScreen() {
         }
 
         studioError = null
+        liveStreamingText = ""
         try {
             val audioFile = recorder.start()
             isRecording = true
+
+            // Start client-side speech recognition for instantaneous live typing
+            liveSpeechStreamer.startListening(
+                languageCode = sourceLangCode,
+                onPartialText = { partial ->
+                    if (isRecording) {
+                        liveStreamingText = partial
+                    }
+                },
+                onFinalText = { finalText ->
+                    if (isRecording) {
+                        liveStreamingText = finalText
+                    }
+                }
+            )
 
             // Amplitude visualizer loop
             scope.launch {
@@ -272,6 +290,7 @@ fun KothonAppScreen() {
     fun stopDictation() {
         if (!isRecording) return
         isRecording = false
+        liveSpeechStreamer.stopListening()
         val audioFile = recorder.stop()
 
         if (audioFile == null || !audioFile.exists() || audioFile.length() < 2500L) {
@@ -482,7 +501,7 @@ fun KothonAppScreen() {
                             }
                             KothonPreferences.PROVIDER_NVIDIA -> {
                                 Text(
-                                    text = "NVIDIA NIM • Llama 3.3 70B • Enterprise speech refinement",
+                                    text = "NVIDIA NIM • NVIDIA-Nemotron-3.5-Transcribe-30B-A4B + Nemotron/Llama 3.3 • Live & high-fidelity transcription",
                                     color = KothonAmber,
                                     fontSize = 12.sp
                                 )
@@ -1017,6 +1036,46 @@ fun KothonAppScreen() {
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         )
+
+                        // Real-time live dictation streaming display
+                        if (isRecording && liveStreamingText.isNotBlank()) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 10.dp)
+                                    .testTag("live_speech_stream_card"),
+                                colors = CardDefaults.cardColors(containerColor = KothonDarkCard),
+                                shape = RoundedCornerShape(10.dp),
+                                border = CardDefaults.outlinedCardBorder().copy(
+                                    brush = androidx.compose.ui.graphics.SolidColor(KothonCyan.copy(alpha = 0.6f))
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(KothonRose)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "LIVE: ",
+                                        color = KothonCyan,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = liveStreamingText,
+                                        color = KothonTextPrimary,
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp
+                                    )
+                                }
+                            }
+                        }
 
                         // Error Banner with Fallback Action
                         if (studioError != null) {

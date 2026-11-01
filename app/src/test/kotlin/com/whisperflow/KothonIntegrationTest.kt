@@ -92,6 +92,27 @@ class KothonIntegrationTest {
     }
 
     @Test
+    fun `universal output parser unwraps language array json correctly`() {
+        val sampleJson = """{"Bengali":["জেমিনির কয়েকটি মডেল ফলব্যাকে যোগ করুন।"],"English":["Add a few Gemini models to the fallback."]}"""
+        val result = transcriptionClient.parseUniversalOutput(
+            rawOutput = sampleJson,
+            targetLangName = "English",
+            targetLangCode = "en",
+            tone = KothonPreferences.TONE_PROFESSIONAL
+        )
+        assertEquals("Add a few Gemini models to the fallback.", result.refinedText)
+        assertFalse(result.refinedText.contains("{"))
+        assertFalse(result.refinedText.contains("["))
+    }
+
+    @Test
+    fun `gemini fallback models are populated`() {
+        assertTrue(transcriptionClient.geminiFallbackModels.contains("gemini-2.5-flash"))
+        assertTrue(transcriptionClient.geminiFallbackModels.contains("gemini-1.5-flash"))
+        assertTrue(transcriptionClient.geminiFallbackModels.contains("gemini-2.0-flash"))
+    }
+
+    @Test
     fun `voice button state enum contains all expected states`() {
         val states = VoiceButtonState.values()
         assertTrue(states.contains(VoiceButtonState.IDLE))
