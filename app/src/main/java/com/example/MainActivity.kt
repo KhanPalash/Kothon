@@ -455,6 +455,7 @@ fun KothonAppScreen() {
                                     onClick = {
                                         selectedProvider = provider
                                         preferences.provider = provider
+                                        apiKeyText = preferences.getApiKeyForProvider(provider)
                                         keyTestResult = null
                                     },
                                     label = {
@@ -480,7 +481,7 @@ fun KothonAppScreen() {
                         when (selectedProvider) {
                             KothonPreferences.PROVIDER_GEMINI -> {
                                 Text(
-                                    text = "Google Gemini 2.5 Flash • Multimodal Audio Intelligence • Pre-configured with built-in AI Studio key",
+                                    text = "Google Gemini 3.8 Flash • Multimodal Audio Intelligence • Pre-configured with built-in AI Studio key",
                                     color = KothonEmerald,
                                     fontSize = 12.sp
                                 )
@@ -515,7 +516,7 @@ fun KothonAppScreen() {
                                 value = apiKeyText,
                                 onValueChange = {
                                     apiKeyText = it
-                                    preferences.apiKey = it.trim()
+                                    preferences.setApiKeyForProvider(selectedProvider, it.trim())
                                     keyTestResult = null
                                 },
                                 placeholder = {
@@ -584,7 +585,7 @@ fun KothonAppScreen() {
 
                                 Button(
                                     onClick = {
-                                        preferences.apiKey = apiKeyText.trim()
+                                        preferences.setApiKeyForProvider(selectedProvider, apiKeyText.trim())
                                         Toast.makeText(context, "$selectedProvider Key saved!", Toast.LENGTH_SHORT).show()
                                     },
                                     colors = ButtonDefaults.buttonColors(

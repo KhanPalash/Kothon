@@ -106,10 +106,19 @@ class KothonIntegrationTest {
     }
 
     @Test
-    fun `gemini fallback models are populated`() {
-        assertTrue(transcriptionClient.geminiFallbackModels.contains("gemini-2.5-flash"))
-        assertTrue(transcriptionClient.geminiFallbackModels.contains("gemini-1.5-flash"))
-        assertTrue(transcriptionClient.geminiFallbackModels.contains("gemini-2.0-flash"))
+    fun `gemini fallback models are populated with active models`() {
+        assertTrue(transcriptionClient.geminiFallbackModels.contains("gemini-3.8-flash"))
+        assertTrue(transcriptionClient.geminiFallbackModels.contains("gemini-3.5-flash"))
+        assertTrue(transcriptionClient.geminiFallbackModels.contains("gemini-3.5-flash-lite"))
+    }
+
+    @Test
+    fun `preferences store per provider api keys independently`() {
+        preferences.setApiKeyForProvider(KothonPreferences.PROVIDER_NVIDIA, "nvapi-12345")
+        preferences.setApiKeyForProvider(KothonPreferences.PROVIDER_GROQ, "gsk-67890")
+
+        assertEquals("nvapi-12345", preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_NVIDIA))
+        assertEquals("gsk-67890", preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_GROQ))
     }
 
     @Test

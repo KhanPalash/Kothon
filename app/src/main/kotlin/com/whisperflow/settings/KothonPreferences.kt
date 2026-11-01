@@ -13,8 +13,21 @@ class KothonPreferences(context: Context) {
         set(value) = prefs.edit().putString(KEY_PROVIDER, value).apply()
 
     var apiKey: String
-        get() = prefs.getString(KEY_API_KEY, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_API_KEY, value).apply()
+        get() = getApiKeyForProvider(provider)
+        set(value) = setApiKeyForProvider(provider, value)
+
+    fun getApiKeyForProvider(providerName: String): String {
+        val specific = prefs.getString("key_api_key_$providerName", "") ?: ""
+        if (specific.isNotEmpty()) return specific
+        return prefs.getString(KEY_API_KEY, "") ?: ""
+    }
+
+    fun setApiKeyForProvider(providerName: String, key: String) {
+        prefs.edit()
+            .putString("key_api_key_$providerName", key)
+            .putString(KEY_API_KEY, key)
+            .apply()
+    }
 
     var isTranslateEnabled: Boolean
         get() = prefs.getBoolean(KEY_TRANSLATE, true)

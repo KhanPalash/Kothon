@@ -61,6 +61,13 @@ class SettingsActivity : ComponentActivity() {
             KothonPreferences.PROVIDERS
         )
         providerSpinner.adapter = providerAdapter
+        providerSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val prov = KothonPreferences.PROVIDERS.getOrNull(position) ?: KothonPreferences.PROVIDER_GEMINI
+                apiKeyInput.setText(preferences.getApiKeyForProvider(prov))
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
 
         val langAdapter = ArrayAdapter(
             this,
@@ -85,7 +92,7 @@ class SettingsActivity : ComponentActivity() {
             providerSpinner.setSelection(providerIndex)
         }
 
-        apiKeyInput.setText(preferences.apiKey)
+        apiKeyInput.setText(preferences.getApiKeyForProvider(currentProvider))
 
         val sourceIndex = supportedLanguages.indexOfFirst { it.code.equals(preferences.sourceLanguage, ignoreCase = true) }
         if (sourceIndex >= 0) {
@@ -115,7 +122,7 @@ class SettingsActivity : ComponentActivity() {
         val selectedTone = toneSpinner.selectedItem as? String ?: KothonPreferences.TONE_PROFESSIONAL
 
         preferences.provider = selectedProvider
-        preferences.apiKey = enteredKey
+        preferences.setApiKeyForProvider(selectedProvider, enteredKey)
 
         if (sourceIndex in supportedLanguages.indices) {
             preferences.sourceLanguage = supportedLanguages[sourceIndex].code

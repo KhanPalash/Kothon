@@ -38,13 +38,13 @@ class TranscriptionClient(private val context: Context) {
         .writeTimeout(45, TimeUnit.SECONDS)
         .build()
 
-    // Gemini fallback model list
+    // Gemini active models with fallback chain
     val geminiFallbackModels = listOf(
-        "gemini-2.5-flash",
-        "gemini-1.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-pro",
-        "gemini-2.0-flash-lite"
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest"
     )
 
     fun isOnline(): Boolean {
@@ -166,7 +166,7 @@ class TranscriptionClient(private val context: Context) {
         }
 
         val provider = preferences.provider
-        val customKey = preferences.apiKey.trim()
+        val customKey = preferences.getApiKeyForProvider(provider).trim()
 
         val sourceLangObj = LanguageCatalog.findByCode(sourceLanguageCode)
         val targetLangObj = LanguageCatalog.findByCode(targetLanguageCode)
@@ -174,12 +174,21 @@ class TranscriptionClient(private val context: Context) {
         return try {
             when (provider) {
                 KothonPreferences.PROVIDER_NVIDIA -> {
+                    if (customKey.isBlank()) {
+                        throw IOException("NVIDIA API key is missing. Please enter your NVIDIA NIM API key in Settings (gear icon) or switch to Gemini (Built-in).")
+                    }
                     callNvidiaNemotron(audioFile, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar)
                 }
                 KothonPreferences.PROVIDER_GROQ -> {
+                    if (customKey.isBlank()) {
+                        throw IOException("Groq API key is missing. Please enter your Groq API key in Settings (gear icon) or switch to Gemini (Built-in).")
+                    }
                     callGroq(audioFile, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar)
                 }
                 KothonPreferences.PROVIDER_OPENAI -> {
+                    if (customKey.isBlank()) {
+                        throw IOException("OpenAI API key is missing. Please enter your OpenAI API key in Settings (gear icon) or switch to Gemini (Built-in).")
+                    }
                     callOpenAi(audioFile, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar)
                 }
                 else -> {
@@ -187,12 +196,20 @@ class TranscriptionClient(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            Log.w("TranscriptionClient", "$provider failed: ${e.message}. Triggering Gemini model fallback.", e)
+            Log.w("TranscriptionClient", "$provider failed: ${e.message}", e)
+            val msg = e.message ?: ""
             if (provider != KothonPreferences.PROVIDER_GEMINI) {
-                // Smooth fallback to Gemini models with built-in key!
-                callGeminiWithFallbacks(audioFile, "", sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar)
+                if (msg.contains("API key is missing", ignoreCase = true)) {
+                    throw (e as? IOException) ?: IOException(msg, e)
+                }
+                // If custom provider had a service or network error, attempt smooth Gemini fallback
+                try {
+                    callGeminiWithFallbacks(audioFile, "", sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar)
+                } catch (fallbackEx: Exception) {
+                    throw IOException("$provider error: ${e.message}. (Gemini fallback: ${fallbackEx.message})", e)
+                }
             } else {
-                throw (e as? IOException) ?: IOException(e.message ?: "Transcription error", e)
+                throw (e as? IOException) ?: IOException(msg.ifBlank { "Transcription error" }, e)
             }
         }
     }
@@ -296,7 +313,16 @@ class TranscriptionClient(private val context: Context) {
                         val firstCandidate = candidates.getJSONObject(0)
                         val content = firstCandidate.getJSONObject("content")
                         val parts = content.getJSONArray("parts")
-                        val resultText = parts.getJSONObject(0).getString("text").trim()
+                        val sb = java.lang.StringBuilder()
+                        for (i in 0 until parts.length()) {
+                            val part = parts.getJSONObject(i)
+                            if (part.optBoolean("thought", false)) continue
+                            val text = part.optString("text", "")
+                            if (text.isNotEmpty()) {
+                                sb.append(text)
+                            }
+                        }
+                        val resultText = sb.toString().trim()
                         if (resultText.isNotEmpty()) {
                             val parsed = parseUniversalOutput(resultText, targetLangName, targetLangCode, tone)
                             if (parsed.rawTranscript.contains("Kothon AI", ignoreCase = true) ||
