@@ -119,6 +119,35 @@ class KothonIntegrationTest {
 
         assertEquals("nvapi-12345", preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_NVIDIA))
         assertEquals("gsk-67890", preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_GROQ))
+        // Verify no cross-provider key poisoning into Gemini or OpenAI
+        assertEquals("", preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_GEMINI))
+        assertEquals("", preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_OPENAI))
+    }
+
+    @Test
+    fun `keystore helper encrypts and decrypts sensitive keys accurately`() {
+        val rawKey = "sk-proj-test123456789"
+        val encrypted = com.whisperflow.settings.KeyStoreHelper.encrypt(rawKey)
+        assertTrue(encrypted.startsWith("ENC:"))
+        assertFalse(encrypted.contains(rawKey))
+
+        val decrypted = com.whisperflow.settings.KeyStoreHelper.decrypt(encrypted)
+        assertEquals(rawKey, decrypted)
+    }
+
+    @Test
+    fun `preferences store keys encrypted in raw sharedpreferences`() {
+        val testKey = "nvapi-secret-key-abc"
+        preferences.setApiKeyForProvider(KothonPreferences.PROVIDER_NVIDIA, testKey)
+
+        // Verify transparent decryption via API
+        assertEquals(testKey, preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_NVIDIA))
+
+        // Verify underlying storage on disk is encrypted with ENC: prefix
+        val rawPrefs = context.getSharedPreferences(KothonPreferences.PREFS_NAME, Context.MODE_PRIVATE)
+        val rawStoredValue = rawPrefs.getString("key_api_key_${KothonPreferences.PROVIDER_NVIDIA}", "") ?: ""
+        assertTrue(rawStoredValue.startsWith("ENC:"))
+        assertFalse(rawStoredValue.contains("nvapi-secret-key-abc"))
     }
 
     @Test
@@ -130,5 +159,90 @@ class KothonIntegrationTest {
         assertTrue(states.contains(VoiceButtonState.SUCCESS))
         assertTrue(states.contains(VoiceButtonState.ERROR))
         assertTrue(states.contains(VoiceButtonState.PERMISSION_REQUIRED))
+    }
+
+    @Test
+    fun `recorder cleans up stale recordings older than 3 minutes`() {
+        val recorder = com.whisperflow.audio.Recorder(context)
+        val staleFile = File(context.cacheDir, "kothon_audio_stale_test.m4a").apply {
+            writeBytes(ByteArray(100))
+            setLastModified(System.currentTimeMillis() - 300_000L) // 5 minutes ago
+        }
+        val freshFile = File(context.cacheDir, "kothon_audio_fresh_test.m4a").apply {
+            writeBytes(ByteArray(100))
+            setLastModified(System.currentTimeMillis())
+        }
+
+        assertTrue(staleFile.exists())
+        assertTrue(freshFile.exists())
+
+        recorder.cleanupStaleRecordings()
+
+        assertFalse("Stale audio file should be purged", staleFile.exists())
+        assertTrue("Fresh audio file should be preserved", freshFile.exists())
+
+        // Cleanup
+        freshFile.delete()
+    }
+
+    @Test
+    fun `refineText returns empty string for blank input`() {
+        runBlocking {
+            val result = transcriptionClient.refineText("    \n\t")
+            assertEquals("", result)
+        }
+    }
+
+    @Test
+    fun `refineText preserves raw text when offline`() {
+        val sampleText = "Ami ekhon kaj ta korchi"
+        runBlocking {
+            // In unit test environment without active network, refineText preserves raw input
+            val result = transcriptionClient.refineText(sampleText)
+            assertEquals(sampleText, result)
+        }
+    }
+
+    @Test
+    fun `parseUniversalOutput parses plain non-json text directly`() {
+        val plainText = "This is a direct polished sentence without any JSON formatting."
+        val result = transcriptionClient.parseUniversalOutput(
+            rawOutput = plainText,
+            targetLangName = "English",
+            targetLangCode = "en",
+            tone = KothonPreferences.TONE_CASUAL
+        )
+        assertEquals(plainText, result.refinedText)
+    }
+
+    @Test
+    fun `live dictation preferences default to ACCURATE and flag off`() {
+        assertEquals(KothonPreferences.MODE_ACCURATE, preferences.dictationMode)
+        assertTrue(preferences.liveAutoRefine)
+        assertEquals("", preferences.liveLanguage)
+        assertTrue(preferences.livePreferOnDevice)
+        assertTrue(preferences.liveModelDownloadWifiOnly)
+        assertEquals(KothonPreferences.DEFAULT_LIVE_SESSION_MAX_MS, preferences.liveSessionMaxMs)
+        assertFalse(preferences.liveDictationEnabled)
+    }
+
+    @Test
+    fun `live dictation preferences persist across instances`() {
+        preferences.dictationMode = KothonPreferences.MODE_LIVE
+        preferences.liveAutoRefine = false
+        preferences.liveLanguage = "bn"
+        preferences.livePreferOnDevice = false
+        preferences.liveModelDownloadWifiOnly = false
+        preferences.liveSessionMaxMs = 45_000L
+        preferences.liveDictationEnabled = true
+
+        val reloaded = KothonPreferences(context)
+        assertEquals(KothonPreferences.MODE_LIVE, reloaded.dictationMode)
+        assertFalse(reloaded.liveAutoRefine)
+        assertEquals("bn", reloaded.liveLanguage)
+        assertFalse(reloaded.livePreferOnDevice)
+        assertFalse(reloaded.liveModelDownloadWifiOnly)
+        assertEquals(45_000L, reloaded.liveSessionMaxMs)
+        assertTrue(reloaded.liveDictationEnabled)
     }
 }

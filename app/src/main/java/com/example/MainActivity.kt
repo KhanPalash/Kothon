@@ -71,7 +71,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -93,6 +95,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.ui.theme.KothonAmber
 import com.example.ui.theme.KothonBorder
 import com.example.ui.theme.KothonCyan
@@ -108,8 +113,14 @@ import com.example.ui.theme.KothonTextSecondary
 import com.example.ui.theme.MyApplicationTheme
 import com.whisperflow.api.TranscriptionClient
 import com.whisperflow.api.TranscriptionResult
+import com.whisperflow.audio.AndroidSpeechSession
+import com.whisperflow.audio.DeviceSpikeValidator
+import com.whisperflow.audio.DictationState
+import com.whisperflow.audio.LiveDictationController
+import com.whisperflow.audio.LiveDictationSupport
 import com.whisperflow.audio.PermissionHelper
 import com.whisperflow.audio.Recorder
+import com.whisperflow.audio.StudioEditorAdapter
 import com.whisperflow.model.Language
 import com.whisperflow.model.LanguageCatalog
 import com.whisperflow.settings.KothonPreferences
@@ -117,10 +128,12 @@ import com.whisperflow.settings.SettingsActivity
 import com.whisperflow.ui.LanguageSelectorBottomSheet
 import com.whisperflow.ui.MicrophonePermissionDialog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 data class RefinedStudioNote(
     val id: Long = System.currentTimeMillis(),
@@ -210,15 +223,45 @@ fun KothonAppScreen() {
     var fixGrammar by remember { mutableStateOf(preferences.fixGrammar) }
 
     // Audio & Dictation state
-    val liveSpeechStreamer = remember { com.whisperflow.audio.LiveSpeechStreamer(context) }
+    val studioEditor = remember { StudioEditorAdapter() }
+    val speechSession = remember { AndroidSpeechSession(context) }
+    val liveController = remember {
+        LiveDictationController(
+            speechSession = speechSession,
+            editor = studioEditor,
+            scope = scope,
+            autoRefine = preferences.liveAutoRefine,
+            textRefiner = { rawText ->
+                transcriptionClient.refineText(
+                    rawText = rawText,
+                    sourceLanguageCode = preferences.sourceLanguage,
+                    targetLanguageCode = preferences.targetLanguage,
+                    tone = preferences.tone,
+                    removeFillers = preferences.removeFillers,
+                    fixGrammar = preferences.fixGrammar
+                )
+            }
+        )
+    }
+    val liveUi by liveController.uiState.collectAsState()
+
     var liveStreamingText by remember { mutableStateOf("") }
     var isRecording by remember { mutableStateOf(false) }
     var isProcessing by remember { mutableStateOf(false) }
     var amplitude by remember { mutableFloatStateOf(0f) }
+    var amplitudeJob by remember { mutableStateOf<Job?>(null) }
     var lastResult by remember { mutableStateOf<TranscriptionResult?>(null) }
     var studioError by remember { mutableStateOf<String?>(null) }
     var testInputText by remember { mutableStateOf("") }
     var showRawComparison by remember { mutableStateOf(false) }
+    var liveEnabled by remember { mutableStateOf(preferences.liveDictationEnabled) }
+    var dictationMode by remember { mutableStateOf(preferences.dictationMode) }
+    var autoRefine by remember { mutableStateOf(preferences.liveAutoRefine) }
+    var modelStatus by remember { mutableStateOf<String?>(null) }
+    var lastSavedSessionId by remember { mutableStateOf(0L) }
+    var activeStudioMode by remember { mutableStateOf(KothonPreferences.MODE_ACCURATE) }
+    val liveModeActive = liveEnabled && dictationMode == KothonPreferences.MODE_LIVE
+    val livePreviewText = if (liveModeActive) liveUi.liveText else liveStreamingText
 
     val recentNotes = remember {
         mutableStateListOf(
@@ -245,56 +288,202 @@ fun KothonAppScreen() {
         label = "pulse"
     )
 
-    fun startDictation() {
-        if (!hasMicPermission) {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    DisposableEffect(Unit) {
+        onDispose {
+            liveController.cancelSession()
+            speechSession.destroy()
+            if (recorder.isRecording) {
+                recorder.cancel()
+            }
+            amplitudeJob?.cancel()
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                liveEnabled = preferences.liveDictationEnabled
+                dictationMode = preferences.dictationMode
+                autoRefine = preferences.liveAutoRefine
+                sourceLangCode = preferences.sourceLanguage
+                targetLangCode = preferences.targetLanguage
+                currentTone = preferences.tone
+                removeFillers = preferences.removeFillers
+                fixGrammar = preferences.fixGrammar
+                selectedProvider = preferences.provider
+                apiKeyText = preferences.getApiKeyForProvider(preferences.provider)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(liveUi.state, liveUi.sessionId) {
+        when (liveUi.state) {
+            DictationState.LISTENING -> {
+                isRecording = true
+                isProcessing = false
+                liveStreamingText = liveUi.liveText
+            }
+            DictationState.STOPPING -> {
+                isRecording = false
+                isProcessing = true
+            }
+            DictationState.REFINING -> {
+                isRecording = false
+                isProcessing = true
+                amplitude = 0f
+                liveStreamingText = liveUi.liveText
+            }
+            DictationState.DONE -> {
+                isRecording = false
+                isProcessing = false
+                amplitude = 0f
+                liveStreamingText = liveUi.liveText
+                val finalText = liveUi.liveText.ifBlank { studioEditor.text }.trim()
+                if (finalText.isNotBlank()) {
+                    val rawText = liveController.lastRawText.ifBlank { finalText }.trim()
+                    val result = TranscriptionResult(
+                        rawTranscript = rawText,
+                        refinedText = finalText,
+                        detectedLanguage = LanguageCatalog.findByCode(sourceLangCode).name,
+                        targetLanguage = LanguageCatalog.findByCode(targetLangCode).name,
+                        tone = currentTone
+                    )
+                    lastResult = result
+                    if (liveUi.sessionId != 0L && liveUi.sessionId != lastSavedSessionId) {
+                        lastSavedSessionId = liveUi.sessionId
+                        recentNotes.add(
+                            0,
+                            RefinedStudioNote(
+                                rawText = rawText,
+                                refinedText = finalText,
+                                detectedLanguage = result.detectedLanguage,
+                                targetLanguage = result.targetLanguage,
+                                tone = currentTone,
+                                timestamp = "Just now"
+                            )
+                        )
+                    }
+                } else if (liveUi.statusMessage.isNotBlank() &&
+                    liveUi.statusMessage != "Done."
+                ) {
+                    studioError = liveUi.statusMessage
+                }
+            }
+            DictationState.ERROR -> {
+                isRecording = false
+                isProcessing = false
+                amplitude = 0f
+                studioError = liveUi.statusMessage
+            }
+            DictationState.IDLE -> {
+                if (!isRecording && !isProcessing) amplitude = 0f
+            }
+        }
+    }
+
+    fun cancelStudioDictation() {
+        liveController.cancelSession()
+        if (recorder.isRecording) recorder.cancel()
+        amplitudeJob?.cancel()
+        amplitudeJob = null
+        isRecording = false
+        isProcessing = false
+        amplitude = 0f
+        liveStreamingText = ""
+        studioEditor.reset()
+    }
+
+    fun selectDictationMode(mode: String) {
+        if (mode == KothonPreferences.MODE_LIVE && !liveEnabled) return
+        cancelStudioDictation()
+        dictationMode = mode
+        preferences.dictationMode = mode
+        lastResult = null
+        studioError = null
+        modelStatus = null
+    }
+
+    fun undoStudioLive() {
+        val undone = liveController.undo()
+        if (undone) {
+            val text = studioEditor.text.trim()
+            liveStreamingText = text
+            lastResult = lastResult?.copy(refinedText = text)
+        } else {
+            studioError = "Undo unavailable. The text may have been edited."
+        }
+    }
+
+    fun refineStudioLive() {
+        liveController.refineNow()
+    }
+
+    fun checkStudioModelSupport() {
+        val languageTag = LiveDictationSupport.resolveLanguageTag(
+            liveLanguage = preferences.liveLanguage,
+            sourceLanguage = sourceLangCode,
+            deviceLanguageTag = Locale.getDefault().toLanguageTag()
+        )
+        if (android.os.Build.VERSION.SDK_INT < 33) {
+            modelStatus = "On-device model check requires Android 13 (API 33) or newer."
             return
         }
-
-        studioError = null
-        liveStreamingText = ""
-        try {
-            val audioFile = recorder.start()
-            isRecording = true
-
-            // Start client-side speech recognition for instantaneous live typing
-            liveSpeechStreamer.startListening(
-                languageCode = sourceLangCode,
-                onPartialText = { partial ->
-                    if (isRecording) {
-                        liveStreamingText = partial
-                    }
-                },
-                onFinalText = { finalText ->
-                    if (isRecording) {
-                        liveStreamingText = finalText
-                    }
-                }
-            )
-
-            // Amplitude visualizer loop
-            scope.launch {
-                while (isActive && recorder.isRecording) {
-                    val maxAmp = recorder.getMaxAmplitude()
-                    amplitude = (maxAmp / 32767f).coerceIn(0f, 1f)
-                    delay(80)
-                }
-                amplitude = 0f
+        modelStatus = "Checking on-device model for $languageTag…"
+        scope.launch {
+            val support = DeviceSpikeValidator.checkLanguageSupport(context, languageTag)
+            if (support == null) {
+                modelStatus = "Could not check model support on this device."
+                return@launch
             }
-        } catch (e: Exception) {
-            studioError = "Failed to start recorder: ${e.message}"
-            isRecording = false
+            modelStatus = when {
+                support.installedOnDevice -> "On-device model installed for $languageTag."
+                support.supportedOnDevice -> {
+                    val triggered = DeviceSpikeValidator.triggerModelDownload(context, languageTag)
+                    if (triggered) {
+                        "Download requested for $languageTag. Follow the system prompt."
+                    } else {
+                        "Model download is not available for $languageTag."
+                    }
+                }
+                support.supportedOnline -> "No on-device model for $languageTag. Online recognition is available."
+                else -> "Speech model not available for $languageTag on this device."
+            }
+        }
+    }
+
+    fun startStudioAmplitudePolling() {
+        amplitudeJob?.cancel()
+        amplitudeJob = scope.launch {
+            while (isActive && recorder.isRecording) {
+                amplitude = (recorder.getMaxAmplitude() / 32767f).coerceIn(0f, 1f)
+                delay(80)
+            }
+            amplitude = 0f
         }
     }
 
     fun stopDictation() {
         if (!isRecording) return
-        isRecording = false
-        liveSpeechStreamer.stopListening()
-        val audioFile = recorder.stop()
 
-        if (audioFile == null || !audioFile.exists() || audioFile.length() < 2500L) {
-            studioError = "Recording was too short. Tap the mic, speak your full sentence, then tap again to finish."
+        if (activeStudioMode == KothonPreferences.MODE_LIVE) {
+            isRecording = false
+            isProcessing = true
+            liveController.stop()
+            return
+        }
+
+        isRecording = false
+        amplitudeJob?.cancel()
+        amplitudeJob = null
+        amplitude = 0f
+
+        val file = recorder.stop()
+        if (file == null || !file.exists() || file.length() < 2000L) {
+            file?.delete()
+            studioError = "No speech detected. Tap the mic, speak, then tap again."
             return
         }
 
@@ -305,7 +494,7 @@ fun KothonAppScreen() {
             try {
                 val result = withContext(Dispatchers.IO) {
                     transcriptionClient.processAudio(
-                        audioFile = audioFile,
+                        audioFile = file,
                         sourceLanguageCode = sourceLangCode,
                         targetLanguageCode = targetLangCode,
                         tone = currentTone,
@@ -317,18 +506,65 @@ fun KothonAppScreen() {
                 recentNotes.add(
                     0,
                     RefinedStudioNote(
-                        rawText = result.rawTranscript.ifBlank { "Spoken audio (${audioFile.length() / 1024} KB)" },
+                        rawText = result.rawTranscript,
                         refinedText = result.refinedText,
                         detectedLanguage = result.detectedLanguage,
                         targetLanguage = result.targetLanguage,
-                        tone = currentTone,
+                        tone = result.tone,
                         timestamp = "Just now"
                     )
                 )
+                liveStreamingText = result.refinedText
             } catch (e: Exception) {
                 studioError = e.message ?: "Transcription failed. Check your API key or network connection."
             } finally {
+                file.delete()
                 isProcessing = false
+            }
+        }
+    }
+
+    fun startDictation() {
+        if (!hasMicPermission) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        if (isRecording || isProcessing) return
+
+        studioError = null
+        lastResult = null
+        liveStreamingText = ""
+        studioEditor.reset()
+        activeStudioMode = if (liveModeActive) {
+            KothonPreferences.MODE_LIVE
+        } else {
+            KothonPreferences.MODE_ACCURATE
+        }
+
+        if (activeStudioMode == KothonPreferences.MODE_LIVE) {
+            if (!DeviceSpikeValidator.isRecognitionAvailable(context)) {
+                studioError = "Speech recognition is not available on this device."
+                return
+            }
+            val languageTag = LiveDictationSupport.resolveLanguageTag(
+                liveLanguage = preferences.liveLanguage,
+                sourceLanguage = sourceLangCode,
+                deviceLanguageTag = Locale.getDefault().toLanguageTag()
+            )
+            liveController.autoRefine = autoRefine
+            isRecording = true
+            liveController.start(
+                LiveDictationSupport.buildSpeechConfig(preferences, languageTag),
+                LiveDictationSupport.separatorFor(languageTag)
+            )
+        } else {
+            try {
+                recorder.start(onTimeout = { stopDictation() })
+                isRecording = true
+                startStudioAmplitudePolling()
+            } catch (e: Exception) {
+                isRecording = false
+                studioError = "Failed to start audio recording: ${e.message}"
             }
         }
     }
@@ -926,6 +1162,169 @@ fun KothonAppScreen() {
                 }
             }
 
+            // Dictation mode: ACCURATE (record then refine) or LIVE (stream as you speak)
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("studio_dictation_mode_card"),
+                    colors = CardDefaults.cardColors(containerColor = KothonDarkSurface),
+                    shape = RoundedCornerShape(16.dp),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(KothonBorder)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Dictation Mode",
+                                    color = KothonTextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "LIVE types while you speak. ACCURATE records, then refines with AI.",
+                                    color = KothonTextMuted,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            if (liveModeActive) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(KothonIndigo)
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = "BETA",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = !liveModeActive,
+                                onClick = { selectDictationMode(KothonPreferences.MODE_ACCURATE) },
+                                label = {
+                                    Text(
+                                        text = "ACCURATE",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = KothonCyan,
+                                    selectedLabelColor = Color(0xFF0F172A),
+                                    containerColor = KothonDarkCard,
+                                    labelColor = KothonTextSecondary
+                                ),
+                                modifier = Modifier.testTag("studio_mode_accurate")
+                            )
+                            FilterChip(
+                                selected = liveModeActive,
+                                enabled = liveEnabled,
+                                onClick = { selectDictationMode(KothonPreferences.MODE_LIVE) },
+                                label = {
+                                    Text(
+                                        text = "LIVE",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = KothonIndigo,
+                                    selectedLabelColor = Color.White,
+                                    containerColor = KothonDarkCard,
+                                    labelColor = KothonTextSecondary
+                                ),
+                                modifier = Modifier.testTag("studio_mode_live")
+                            )
+                        }
+
+                        if (!liveEnabled) {
+                            Text(
+                                text = "LIVE is off. Enable \"LIVE dictation (beta)\" in Settings to use it.",
+                                color = KothonAmber,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        } else if (liveModeActive) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Refine with AI after speaking",
+                                        color = KothonTextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = "Off: keep the raw live transcript and tap Refine manually.",
+                                        color = KothonTextMuted,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                                Switch(
+                                    checked = autoRefine,
+                                    onCheckedChange = {
+                                        autoRefine = it
+                                        preferences.liveAutoRefine = it
+                                        liveController.autoRefine = it
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = KothonIndigo
+                                    ),
+                                    modifier = Modifier.testTag("studio_auto_refine_switch")
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = { checkStudioModelSupport() },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .padding(top = 8.dp)
+                                    .testTag("studio_check_model_button")
+                            ) {
+                                Text("Check on-device model", fontSize = 11.sp)
+                            }
+
+                            if (modelStatus != null) {
+                                Text(
+                                    text = modelStatus ?: "",
+                                    color = KothonTextSecondary,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(top = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // In-App Dictation & AI Studio
             item {
                 Card(
@@ -1039,7 +1438,7 @@ fun KothonAppScreen() {
                         )
 
                         // Real-time live dictation streaming display
-                        if (isRecording && liveStreamingText.isNotBlank()) {
+                        if ((isRecording || isProcessing) && livePreviewText.isNotBlank()) {
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1059,21 +1458,57 @@ fun KothonAppScreen() {
                                         modifier = Modifier
                                             .size(8.dp)
                                             .clip(CircleShape)
-                                            .background(KothonRose)
+                                            .background(if (liveModeActive) KothonCyan else KothonRose)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "LIVE: ",
+                                        text = if (liveModeActive) "LIVE: " else "PREVIEW: ",
                                         color = KothonCyan,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = liveStreamingText,
+                                        text = livePreviewText,
                                         color = KothonTextPrimary,
                                         fontSize = 13.sp,
                                         lineHeight = 18.sp
                                     )
+                                }
+                            }
+                        }
+
+                        // Manual undo / refine after a live session
+                        if (liveModeActive && (liveUi.canUndo || liveUi.canRefine)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 10.dp),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                if (liveUi.canUndo) {
+                                    OutlinedButton(
+                                        onClick = { undoStudioLive() },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.testTag("studio_undo_button")
+                                    ) {
+                                        Text("Undo AI refinement", fontSize = 11.sp)
+                                    }
+                                }
+                                if (liveUi.canUndo && liveUi.canRefine) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                if (liveUi.canRefine) {
+                                    Button(
+                                        onClick = { refineStudioLive() },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = KothonAmber,
+                                            contentColor = Color(0xFF0F172A)
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.testTag("studio_refine_button")
+                                    ) {
+                                        Text("Refine with AI", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
@@ -1467,6 +1902,9 @@ fun KothonAppScreen() {
             onLanguageSelected = { lang ->
                 sourceLangCode = lang.code
                 preferences.sourceLanguage = lang.code
+                if (lang.code != "auto" && lang.code != "original") {
+                    preferences.liveLanguage = lang.code
+                }
                 preferences.addRecentLanguage(lang.code)
                 showLanguageSheetForSource = false
             },

@@ -17,15 +17,14 @@ class KothonPreferences(context: Context) {
         set(value) = setApiKeyForProvider(provider, value)
 
     fun getApiKeyForProvider(providerName: String): String {
-        val specific = prefs.getString("key_api_key_$providerName", "") ?: ""
-        if (specific.isNotEmpty()) return specific
-        return prefs.getString(KEY_API_KEY, "") ?: ""
+        val stored = prefs.getString("key_api_key_$providerName", "") ?: ""
+        return KeyStoreHelper.decrypt(stored)
     }
 
     fun setApiKeyForProvider(providerName: String, key: String) {
+        val encrypted = KeyStoreHelper.encrypt(key.trim())
         prefs.edit()
-            .putString("key_api_key_$providerName", key)
-            .putString(KEY_API_KEY, key)
+            .putString("key_api_key_$providerName", encrypted)
             .apply()
     }
 
@@ -52,6 +51,34 @@ class KothonPreferences(context: Context) {
     var fixGrammar: Boolean
         get() = prefs.getBoolean(KEY_FIX_GRAMMAR, true)
         set(value) = prefs.edit().putBoolean(KEY_FIX_GRAMMAR, value).apply()
+
+    var dictationMode: String
+        get() = prefs.getString(KEY_DICTATION_MODE, MODE_ACCURATE) ?: MODE_ACCURATE
+        set(value) = prefs.edit().putString(KEY_DICTATION_MODE, value).apply()
+
+    var liveAutoRefine: Boolean
+        get() = prefs.getBoolean(KEY_LIVE_AUTO_REFINE, true)
+        set(value) = prefs.edit().putBoolean(KEY_LIVE_AUTO_REFINE, value).apply()
+
+    var liveLanguage: String
+        get() = prefs.getString(KEY_LIVE_LANGUAGE, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LIVE_LANGUAGE, value).apply()
+
+    var livePreferOnDevice: Boolean
+        get() = prefs.getBoolean(KEY_LIVE_PREFER_ON_DEVICE, true)
+        set(value) = prefs.edit().putBoolean(KEY_LIVE_PREFER_ON_DEVICE, value).apply()
+
+    var liveModelDownloadWifiOnly: Boolean
+        get() = prefs.getBoolean(KEY_LIVE_MODEL_DOWNLOAD_WIFI_ONLY, true)
+        set(value) = prefs.edit().putBoolean(KEY_LIVE_MODEL_DOWNLOAD_WIFI_ONLY, value).apply()
+
+    var liveSessionMaxMs: Long
+        get() = prefs.getLong(KEY_LIVE_SESSION_MAX_MS, DEFAULT_LIVE_SESSION_MAX_MS)
+        set(value) = prefs.edit().putLong(KEY_LIVE_SESSION_MAX_MS, value).apply()
+
+    var liveDictationEnabled: Boolean
+        get() = prefs.getBoolean(KEY_LIVE_DICTATION_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_LIVE_DICTATION_ENABLED, value).apply()
 
     fun getRecentLanguages(): List<String> {
         val raw = prefs.getString(KEY_RECENT_LANGS, "auto,bn,en,hi,es") ?: "auto,bn,en,hi,es"
@@ -81,6 +108,19 @@ class KothonPreferences(context: Context) {
         const val KEY_TONE = "key_tone"
         const val KEY_REMOVE_FILLERS = "key_remove_fillers"
         const val KEY_FIX_GRAMMAR = "key_fix_grammar"
+
+        const val KEY_DICTATION_MODE = "dictation_mode"
+        const val KEY_LIVE_AUTO_REFINE = "live_auto_refine"
+        const val KEY_LIVE_LANGUAGE = "live_language"
+        const val KEY_LIVE_PREFER_ON_DEVICE = "live_prefer_on_device"
+        const val KEY_LIVE_MODEL_DOWNLOAD_WIFI_ONLY = "live_model_download_wifi_only"
+        const val KEY_LIVE_SESSION_MAX_MS = "live_session_max_ms"
+        const val KEY_LIVE_DICTATION_ENABLED = "live_dictation_enabled"
+
+        const val MODE_ACCURATE = "accurate"
+        const val MODE_LIVE = "live"
+
+        const val DEFAULT_LIVE_SESSION_MAX_MS = 5 * 60_000L
 
         const val PROVIDER_GEMINI = "Gemini"
         const val PROVIDER_OPENAI = "OpenAI"

@@ -8,6 +8,8 @@ import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.view.Window
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,7 +18,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import android.view.Window
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -29,6 +30,13 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.whisperflow.api.TranscriptionClient
+import com.whisperflow.audio.AndroidSpeechSession
+import com.whisperflow.audio.DeviceSpikeValidator
+import com.whisperflow.audio.DictationState
+import com.whisperflow.audio.ImeDictationEditor
+import com.whisperflow.audio.LiveDictationController
+import com.whisperflow.audio.LiveDictationSupport
+import com.whisperflow.audio.PasswordFieldDetector
 import com.whisperflow.audio.PermissionHelper
 import com.whisperflow.audio.Recorder
 import com.whisperflow.settings.KothonPreferences
@@ -44,11 +52,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.IOException
+import java.util.Locale
 
 class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
@@ -66,9 +75,13 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     private lateinit var preferences: KothonPreferences
     private lateinit var recorder: Recorder
     private lateinit var transcriptionClient: TranscriptionClient
-    private lateinit var liveSpeechStreamer: com.whisperflow.audio.LiveSpeechStreamer
-    private var isComposingActive = false
-    private var lastComposingLength = 0
+    private lateinit var speechSession: AndroidSpeechSession
+    private lateinit var dictationEditor: ImeDictationEditor
+    private lateinit var liveController: LiveDictationController
+
+    private var editorToken = 0L
+    private var currentEditorInfo: EditorInfo? = null
+    private var activeDictationMode: String = KothonPreferences.MODE_ACCURATE
 
     // Keyboard UI Mode: false = Voice Mode, true = Standard QWERTY Fallback
     private val _isFallbackKeyboard = MutableStateFlow(false)
@@ -83,7 +96,17 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     private val _statusMessage = MutableStateFlow("")
     val statusMessage = _statusMessage.asStateFlow()
 
-    private var currentRecordingFile: File? = null
+    private val _voiceDisabled = MutableStateFlow(false)
+    val voiceDisabled = _voiceDisabled.asStateFlow()
+
+    private val _canUndo = MutableStateFlow(false)
+    val canUndo = _canUndo.asStateFlow()
+
+    private val _canRefine = MutableStateFlow(false)
+    val canRefine = _canRefine.asStateFlow()
+
+    private val _modeLabel = MutableStateFlow("ACCURATE")
+    val modeLabel = _modeLabel.asStateFlow()
 
     override fun onCreate() {
         super.onCreate()
@@ -93,7 +116,79 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
         preferences = KothonPreferences(this)
         recorder = Recorder(this)
         transcriptionClient = TranscriptionClient(this)
-        liveSpeechStreamer = com.whisperflow.audio.LiveSpeechStreamer(this)
+        speechSession = AndroidSpeechSession(this)
+        dictationEditor = ImeDictationEditor(
+            connection = { currentInputConnection },
+            editorInfo = { currentEditorInfo },
+            token = { editorToken }
+        )
+        liveController = LiveDictationController(
+            speechSession = speechSession,
+            editor = dictationEditor,
+            scope = serviceScope,
+            autoRefine = preferences.liveAutoRefine,
+            textRefiner = { rawText ->
+                transcriptionClient.refineText(
+                    rawText = rawText,
+                    sourceLanguageCode = preferences.sourceLanguage,
+                    targetLanguageCode = preferences.targetLanguage,
+                    tone = preferences.tone,
+                    removeFillers = preferences.removeFillers,
+                    fixGrammar = preferences.fixGrammar
+                )
+            }
+        )
+
+        serviceScope.launch {
+            liveController.uiState.collect { ui ->
+                when (ui.state) {
+                    DictationState.LISTENING -> {
+                        _buttonState.value = VoiceButtonState.RECORDING
+                        _statusMessage.value = "Listening…"
+                    }
+                    DictationState.STOPPING -> {
+                        _amplitude.value = 0f
+                        _buttonState.value = VoiceButtonState.PROCESSING
+                        _statusMessage.value = "Finishing…"
+                    }
+                    DictationState.REFINING -> {
+                        _amplitude.value = 0f
+                        _buttonState.value = VoiceButtonState.PROCESSING
+                        _statusMessage.value = "Polishing with AI…"
+                    }
+                    DictationState.DONE -> {
+                        _amplitude.value = 0f
+                        _canUndo.value = ui.canUndo
+                        _canRefine.value = ui.canRefine
+                        _buttonState.value =
+                            if (ui.liveText.isBlank() && !ui.canUndo && !ui.canRefine) {
+                                VoiceButtonState.IDLE
+                            } else {
+                                VoiceButtonState.SUCCESS
+                            }
+                        _statusMessage.value = ui.statusMessage
+                    }
+                    DictationState.ERROR -> {
+                        _amplitude.value = 0f
+                        _canUndo.value = false
+                        _canRefine.value = false
+                        _buttonState.value = VoiceButtonState.ERROR
+                        _statusMessage.value = ui.statusMessage
+                    }
+                    DictationState.IDLE -> {
+                        _amplitude.value = 0f
+                        _canUndo.value = false
+                        _canRefine.value = false
+                        if (!_voiceDisabled.value &&
+                            _buttonState.value != VoiceButtonState.PERMISSION_REQUIRED
+                        ) {
+                            _buttonState.value = VoiceButtonState.IDLE
+                            _statusMessage.value = ""
+                        }
+                    }
+                }
+            }
+        }
     }
 
     override fun onConfigureWindow(win: Window, isFullscreen: Boolean, isCandidatesOnly: Boolean) {
@@ -137,6 +232,10 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                 val state by _buttonState.collectAsState()
                 val amp by _amplitude.collectAsState()
                 val msg by _statusMessage.collectAsState()
+                val disabled by _voiceDisabled.collectAsState()
+                val undoAvailable by _canUndo.collectAsState()
+                val refineAvailable by _canRefine.collectAsState()
+                val mode by _modeLabel.collectAsState()
 
                 Box(modifier = Modifier.fillMaxWidth()) {
                     if (fallback) {
@@ -166,11 +265,21 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                             sourceLanguageCode = preferences.sourceLanguage,
                             targetLanguageCode = preferences.targetLanguage,
                             tone = preferences.tone,
+                            modeLabel = mode,
+                            voiceDisabled = disabled,
+                            canUndo = undoAvailable,
+                            canRefine = refineAvailable,
                             onRecordStart = {
                                 startVoiceRecording()
                             },
                             onRecordStop = {
                                 stopVoiceRecordingAndProcess()
+                            },
+                            onUndo = {
+                                undoLiveReplacement()
+                            },
+                            onRefine = {
+                                refineLiveNow()
                             },
                             onToggleLanguages = {
                                 // Fast toggle between English and Original (or Bengali)
@@ -202,9 +311,60 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
         return composeView
     }
 
-    override fun onStartInputView(info: android.view.inputmethod.EditorInfo?, restarting: Boolean) {
-        super.onStartInputView(info, restarting)
+    override fun onStartInput(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInput(info, restarting)
+        editorToken++
+        liveController.onFieldChanged(editorToken)
+        if (recorder.isRecording) recorder.cancel()
+        stopAmplitudePolling()
+        _canUndo.value = false
+        _canRefine.value = false
+        refreshEditorState(info)
         checkAndRefreshPermission()
+    }
+
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInputView(info, restarting)
+        refreshEditorState(info)
+        checkAndRefreshPermission()
+    }
+
+    override fun onFinishInputView(finishingInput: Boolean) {
+        super.onFinishInputView(finishingInput)
+        cancelActiveDictation()
+        if (!_voiceDisabled.value) {
+            _buttonState.value = VoiceButtonState.IDLE
+            _statusMessage.value = ""
+        }
+    }
+
+    override fun onFinishInput() {
+        super.onFinishInput()
+        editorToken++
+        cancelActiveDictation()
+        currentEditorInfo = null
+    }
+
+    private fun refreshEditorState(info: EditorInfo?) {
+        currentEditorInfo = info
+        val passwordField = PasswordFieldDetector.shouldDisableVoice(info)
+        _voiceDisabled.value = passwordField
+        _modeLabel.value =
+            if (LiveDictationSupport.isLiveModeEnabled(preferences)) "LIVE" else "ACCURATE"
+
+        if (passwordField) {
+            cancelActiveDictation()
+            _buttonState.value = VoiceButtonState.IDLE
+            _statusMessage.value = "Voice disabled for password fields."
+        }
+    }
+
+    private fun cancelActiveDictation() {
+        liveController.cancelSession()
+        if (recorder.isRecording) recorder.cancel()
+        stopAmplitudePolling()
+        _canUndo.value = false
+        _canRefine.value = false
     }
 
     fun checkAudioPermission(): Boolean {
@@ -222,6 +382,11 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     }
 
     private fun checkAndRefreshPermission() {
+        if (_voiceDisabled.value) {
+            _buttonState.value = VoiceButtonState.IDLE
+            _statusMessage.value = "Voice disabled for password fields."
+            return
+        }
         if (!checkAudioPermission()) {
             _buttonState.value = VoiceButtonState.PERMISSION_REQUIRED
             _statusMessage.value = "Microphone permission required."
@@ -232,82 +397,106 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     }
 
     fun startVoiceRecording() {
+        if (_voiceDisabled.value) {
+            _statusMessage.value = "Voice disabled for password fields."
+            return
+        }
         if (!checkAudioPermission()) {
             _buttonState.value = VoiceButtonState.PERMISSION_REQUIRED
             _statusMessage.value = "Please grant mic permission to record."
             requestAudioPermission()
             return
         }
+        if (currentInputConnection == null) {
+            _buttonState.value = VoiceButtonState.IDLE
+            _statusMessage.value = "No active text field."
+            return
+        }
 
+        _canUndo.value = false
+        _canRefine.value = false
+        activeDictationMode =
+            if (LiveDictationSupport.isLiveModeEnabled(preferences)) {
+                KothonPreferences.MODE_LIVE
+            } else {
+                KothonPreferences.MODE_ACCURATE
+            }
+
+        if (activeDictationMode == KothonPreferences.MODE_LIVE) {
+            startLiveDictation()
+        } else {
+            startAccurateDictation()
+        }
+    }
+
+    private fun startLiveDictation() {
+        if (!DeviceSpikeValidator.isRecognitionAvailable(this)) {
+            _buttonState.value = VoiceButtonState.ERROR
+            _statusMessage.value = "Speech recognition is not available on this device."
+            return
+        }
+
+        val languageTag = LiveDictationSupport.resolveLanguageTag(
+            liveLanguage = preferences.liveLanguage,
+            sourceLanguage = preferences.sourceLanguage,
+            deviceLanguageTag = Locale.getDefault().toLanguageTag()
+        )
+        _buttonState.value = VoiceButtonState.RECORDING
+        _statusMessage.value = "Listening…"
+        liveController.autoRefine = preferences.liveAutoRefine
+        liveController.start(
+            LiveDictationSupport.buildSpeechConfig(preferences, languageTag),
+            LiveDictationSupport.separatorFor(languageTag)
+        )
+    }
+
+    private fun startAccurateDictation() {
         try {
-            val file = recorder.start(onTimeout = {
-                stopVoiceRecordingAndProcess()
-            })
-            currentRecordingFile = file
+            recorder.start(onTimeout = { stopVoiceRecordingAndProcess() })
             _buttonState.value = VoiceButtonState.RECORDING
-            _statusMessage.value = "Listening... Speak in Bangla or English"
-
-            // Start live speech streaming for instantaneous typing feedback
-            isComposingActive = true
-            lastComposingLength = 0
-            liveSpeechStreamer.startListening(
-                languageCode = preferences.sourceLanguage,
-                onPartialText = { partial ->
-                    if (_buttonState.value == VoiceButtonState.RECORDING) {
-                        _statusMessage.value = partial
-                        currentInputConnection?.setComposingText(partial, 1)
-                        lastComposingLength = partial.length
-                    }
-                },
-                onFinalText = { finalText ->
-                    if (_buttonState.value == VoiceButtonState.RECORDING) {
-                        _statusMessage.value = finalText
-                        currentInputConnection?.setComposingText(finalText, 1)
-                        lastComposingLength = finalText.length
-                    }
-                },
-                onError = { err ->
-                    Log.d("KeyboardService", "Live speech streamer notice: $err")
-                }
-            )
-
-            // Start amplitude polling
+            _statusMessage.value = "Recording… tap to stop."
             startAmplitudePolling()
         } catch (e: Exception) {
             Log.e("KeyboardService", "Failed to start audio recording", e)
             _buttonState.value = VoiceButtonState.ERROR
-            _statusMessage.value = "Recording error: ${e.message}"
-            // Fallback to keyboard
-            switchToFallbackKeyboard()
+            _statusMessage.value = "Could not start recording. Check microphone access."
         }
     }
 
     fun stopVoiceRecordingAndProcess() {
+        if (_voiceDisabled.value) return
+
+        if (activeDictationMode == KothonPreferences.MODE_LIVE) {
+            if (liveController.isActive) {
+                liveController.stop()
+            }
+            return
+        }
+
+        if (!recorder.isRecording) return
+        val file = recorder.stop()
         stopAmplitudePolling()
+        _amplitude.value = 0f
 
-        if (_buttonState.value != VoiceButtonState.RECORDING) {
-            return
-        }
-
-        liveSpeechStreamer.stopListening()
-
-        _buttonState.value = VoiceButtonState.PROCESSING
-        _statusMessage.value = "Refining with AI & translating..."
-
-        val recordedAudio = recorder.stop() ?: currentRecordingFile
-        if (recordedAudio == null || !recordedAudio.exists() || recordedAudio.length() < 2500L) {
-            currentInputConnection?.finishComposingText()
-            isComposingActive = false
+        if (file == null || !file.exists() || file.length() < 2000L) {
+            file?.delete()
             _buttonState.value = VoiceButtonState.IDLE
-            _statusMessage.value = "Speech too short. Tap to speak, then tap to stop."
+            _statusMessage.value = "No speech detected. Tap mic to speak."
             return
         }
+
+        processAccurateAudio(file)
+    }
+
+    private fun processAccurateAudio(file: File) {
+        _buttonState.value = VoiceButtonState.PROCESSING
+        _statusMessage.value = "Transcribing with AI…"
 
         serviceScope.launch {
             try {
-                val processedText = withContext(Dispatchers.IO) {
-                    transcriptionClient.transcribeAndRewrite(
-                        audioFile = recordedAudio,
+                val result = withContext(Dispatchers.IO) {
+                    transcriptionClient.processAudio(
+                        audioFile = file,
                         sourceLanguageCode = preferences.sourceLanguage,
                         targetLanguageCode = preferences.targetLanguage,
                         tone = preferences.tone,
@@ -315,52 +504,59 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                         fixGrammar = preferences.fixGrammar
                     )
                 }
-
-                if (processedText.isNotBlank()) {
-                    val inputConn = currentInputConnection
-                    if (inputConn != null) {
-                        if (isComposingActive && lastComposingLength > 0) {
-                            inputConn.finishComposingText()
-                            inputConn.deleteSurroundingText(lastComposingLength, 0)
-                        }
-                        inputConn.commitText(processedText, 1)
-                    }
-                    isComposingActive = false
-                    lastComposingLength = 0
-
+                val text = result.refinedText.trim()
+                val conn = currentInputConnection
+                if (text.isNotBlank() && conn != null) {
+                    conn.commitText(text, 1)
                     _buttonState.value = VoiceButtonState.SUCCESS
-                    _statusMessage.value = "Inserted: \"$processedText\""
-
-                    // Auto-reset to IDLE after 2 seconds
-                    delay(2000)
-                    if (_buttonState.value == VoiceButtonState.SUCCESS) {
-                        _buttonState.value = VoiceButtonState.IDLE
-                        _statusMessage.value = ""
-                    }
+                    _statusMessage.value = "Inserted refined text."
                 } else {
-                    currentInputConnection?.finishComposingText()
-                    isComposingActive = false
-                    _buttonState.value = VoiceButtonState.ERROR
-                    _statusMessage.value = "Refinement produced empty text."
+                    _buttonState.value = VoiceButtonState.IDLE
+                    _statusMessage.value = "No text returned."
                 }
-            } catch (e: IOException) {
-                Log.w("KeyboardService", "Transcription failed, falling back to keyboard", e)
-                currentInputConnection?.finishComposingText()
-                isComposingActive = false
-                _buttonState.value = VoiceButtonState.ERROR
-                _statusMessage.value = e.message ?: "Failed. Falling back to keyboard."
-                // Graceful fallback to standard keyboard layout
-                delay(1200)
-                switchToFallbackKeyboard()
             } catch (e: Exception) {
-                Log.e("KeyboardService", "Unexpected processing error", e)
-                currentInputConnection?.finishComposingText()
-                isComposingActive = false
+                Log.w("KeyboardService", "ACCURATE transcription failed: ${e.message}")
                 _buttonState.value = VoiceButtonState.ERROR
-                _statusMessage.value = "Error: ${e.localizedMessage}"
-                switchToFallbackKeyboard()
+                _statusMessage.value = "Transcription failed. Check API key or network."
+            } finally {
+                file.delete()
+                delay(2500)
+                if (_buttonState.value == VoiceButtonState.SUCCESS ||
+                    _buttonState.value == VoiceButtonState.ERROR
+                ) {
+                    _buttonState.value = VoiceButtonState.IDLE
+                    _statusMessage.value = ""
+                }
             }
         }
+    }
+
+    fun undoLiveReplacement() {
+        val undone = liveController.undo()
+        _canUndo.value = false
+        _statusMessage.value = if (undone) "Reverted to raw text." else "Undo unavailable."
+    }
+
+    fun refineLiveNow() {
+        liveController.refineNow()
+    }
+
+    private fun startAmplitudePolling() {
+        amplitudeJob?.cancel()
+        amplitudeJob = serviceScope.launch {
+            while (isActive && recorder.isRecording) {
+                val maxAmp = recorder.getMaxAmplitude()
+                _amplitude.value = (maxAmp / 32767f).coerceIn(0f, 1f)
+                delay(80)
+            }
+            _amplitude.value = 0f
+        }
+    }
+
+    private fun stopAmplitudePolling() {
+        amplitudeJob?.cancel()
+        amplitudeJob = null
+        _amplitude.value = 0f
     }
 
     fun switchToFallbackKeyboard() {
@@ -374,25 +570,6 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
             return
         }
         inputConn.commitText(text, 1)
-    }
-
-    private fun startAmplitudePolling() {
-        amplitudeJob?.cancel()
-        amplitudeJob = serviceScope.launch {
-            while (isActive && recorder.isRecording) {
-                val maxAmp = recorder.getMaxAmplitude()
-                // Normalize 0..32767 to 0..1
-                _amplitude.value = (maxAmp / 32767f).coerceIn(0f, 1f)
-                delay(80)
-            }
-            _amplitude.value = 0f
-        }
-    }
-
-    private fun stopAmplitudePolling() {
-        amplitudeJob?.cancel()
-        amplitudeJob = null
-        _amplitude.value = 0f
     }
 
     private fun openSettings() {
@@ -425,8 +602,10 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     }
 
     override fun onDestroy() {
-        liveSpeechStreamer.stopListening()
+        liveController.cancelSession()
+        speechSession.destroy()
         recorder.cancel()
+        stopAmplitudePolling()
         serviceScope.cancel()
         store.clear()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)

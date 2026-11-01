@@ -2,7 +2,10 @@ package com.whisperflow.audio
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -10,25 +13,62 @@ import android.util.Log
 
 class LiveSpeechStreamer(private val context: Context) {
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var speechRecognizer: SpeechRecognizer? = null
+
+    var isSessionActive: Boolean = false
+        private set
     var isStreaming: Boolean = false
         private set
+
+    private var currentLanguageCode: String = "auto"
+    private var onPartialCallback: ((String) -> Unit)? = null
+    private var onSegmentFinalCallback: ((String) -> Unit)? = null
+    private var onRmsCallback: ((Float) -> Unit)? = null
+    private var onErrorCallback: ((Int, String) -> Unit)? = null
 
     fun startListening(
         languageCode: String = "auto",
         onPartialText: (String) -> Unit,
-        onFinalText: (String) -> Unit,
-        onError: ((String) -> Unit)? = null
+        onSegmentFinal: (String) -> Unit,
+        onRmsChanged: ((Float) -> Unit)? = null,
+        onError: ((Int, String) -> Unit)? = null
     ) {
         stopListening()
 
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             Log.w("LiveSpeechStreamer", "Speech recognition not available on device")
+            onError?.invoke(-1, "Speech recognition service not available on device")
             return
         }
 
+        isSessionActive = true
+        currentLanguageCode = languageCode
+        onPartialCallback = onPartialText
+        onSegmentFinalCallback = onSegmentFinal
+        onRmsCallback = onRmsChanged
+        onErrorCallback = onError
+
+        mainHandler.post {
+            createAndStartRecognizer()
+        }
+    }
+
+    private fun createAndStartRecognizer() {
+        if (!isSessionActive) return
+
         try {
-            val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+            cleanupRecognizer()
+
+            val recognizer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+            ) {
+                Log.d("LiveSpeechStreamer", "Binding to On-Device SpeechRecognizer")
+                SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            } else {
+                SpeechRecognizer.createSpeechRecognizer(context)
+            }
+
             speechRecognizer = recognizer
 
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -36,7 +76,7 @@ class LiveSpeechStreamer(private val context: Context) {
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
 
-                val tag = when (languageCode.lowercase()) {
+                val tag = when (currentLanguageCode.lowercase()) {
                     "bn" -> "bn-BD"
                     "en" -> "en-US"
                     "hi" -> "hi-IN"
@@ -56,11 +96,19 @@ class LiveSpeechStreamer(private val context: Context) {
 
                 override fun onBeginningOfSpeech() {}
 
-                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onRmsChanged(rmsdB: Float) {
+                    if (isSessionActive) {
+                        // Normalize -2dB..10dB to 0..1f
+                        val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                        onRmsCallback?.invoke(normalized)
+                    }
+                }
 
                 override fun onBufferReceived(buffer: ByteArray?) {}
 
-                override fun onEndOfSpeech() {}
+                override fun onEndOfSpeech() {
+                    isStreaming = false
+                }
 
                 override fun onError(error: Int) {
                     isStreaming = false
@@ -76,8 +124,32 @@ class LiveSpeechStreamer(private val context: Context) {
                         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timeout"
                         else -> "Recognition error ($error)"
                     }
-                    Log.d("LiveSpeechStreamer", "Recognition notice: $errorMsg")
-                    onError?.invoke(errorMsg)
+                    Log.d("LiveSpeechStreamer", "Recognition notice ($error): $errorMsg")
+
+                    if (!isSessionActive) return
+
+                    when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH,
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                            // User paused speaking; seamlessly restart listening
+                            mainHandler.postDelayed({
+                                if (isSessionActive) {
+                                    createAndStartRecognizer()
+                                }
+                            }, 100)
+                        }
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
+                            mainHandler.postDelayed({
+                                if (isSessionActive) {
+                                    createAndStartRecognizer()
+                                }
+                            }, 300)
+                        }
+                        else -> {
+                            isSessionActive = false
+                            onErrorCallback?.invoke(error, errorMsg)
+                        }
+                    }
                 }
 
                 override fun onResults(results: Bundle?) {
@@ -85,7 +157,16 @@ class LiveSpeechStreamer(private val context: Context) {
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val text = matches?.firstOrNull() ?: ""
                     if (text.isNotBlank()) {
-                        onFinalText(text)
+                        onSegmentFinalCallback?.invoke(text)
+                    }
+
+                    // Continuous session loop: restart for the next sentence
+                    if (isSessionActive) {
+                        mainHandler.post {
+                            if (isSessionActive) {
+                                createAndStartRecognizer()
+                            }
+                        }
                     }
                 }
 
@@ -93,7 +174,7 @@ class LiveSpeechStreamer(private val context: Context) {
                     val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val partialText = matches?.firstOrNull() ?: ""
                     if (partialText.isNotBlank()) {
-                        onPartialText(partialText)
+                        onPartialCallback?.invoke(partialText)
                     }
                 }
 
@@ -103,20 +184,30 @@ class LiveSpeechStreamer(private val context: Context) {
             recognizer.startListening(intent)
             isStreaming = true
         } catch (e: Exception) {
-            Log.e("LiveSpeechStreamer", "Failed to start live speech streaming", e)
+            Log.e("LiveSpeechStreamer", "Failed to start live speech session", e)
             isStreaming = false
+            isSessionActive = false
+            onErrorCallback?.invoke(-2, "Failed to start live speech session: ${e.message}")
         }
     }
 
-    fun stopListening() {
-        isStreaming = false
+    private fun cleanupRecognizer() {
         try {
             speechRecognizer?.stopListening()
             speechRecognizer?.cancel()
             speechRecognizer?.destroy()
-        } catch (e: Exception) {
-            // ignore
-        }
+        } catch (ignored: Exception) {}
         speechRecognizer = null
+        isStreaming = false
+    }
+
+    fun stopListening() {
+        isSessionActive = false
+        mainHandler.removeCallbacksAndMessages(null)
+        cleanupRecognizer()
+        onPartialCallback = null
+        onSegmentFinalCallback = null
+        onRmsCallback = null
+        onErrorCallback = null
     }
 }

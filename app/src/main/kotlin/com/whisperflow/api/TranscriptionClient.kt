@@ -74,8 +74,12 @@ class TranscriptionClient(private val context: Context) {
                     var lastMsg = ""
                     for (model in geminiFallbackModels) {
                         try {
-                            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model?key=$key"
-                            val request = Request.Builder().url(url).get().build()
+                            val url = "https://generativelanguage.googleapis.com/v1beta/models/$model"
+                            val request = Request.Builder()
+                                .url(url)
+                                .addHeader("x-goog-api-key", key)
+                                .get()
+                                .build()
                             httpClient.newCall(request).execute().use { resp ->
                                 if (resp.isSuccessful) {
                                     success = true
@@ -146,6 +150,58 @@ class TranscriptionClient(private val context: Context) {
     ): String {
         val result = processAudio(audioFile, sourceLanguageCode, targetLanguageCode, tone, removeFillers, fixGrammar)
         return result.refinedText
+    }
+
+    @Throws(IOException::class)
+    suspend fun refineText(
+        rawText: String,
+        sourceLanguageCode: String = preferences.sourceLanguage,
+        targetLanguageCode: String = preferences.targetLanguage,
+        tone: String = preferences.tone,
+        removeFillers: Boolean = preferences.removeFillers,
+        fixGrammar: Boolean = preferences.fixGrammar
+    ): String {
+        val trimmed = rawText.trim()
+        if (trimmed.isBlank()) return ""
+        if (!isOnline()) {
+            return trimmed
+        }
+
+        val provider = preferences.provider
+        val customKey = preferences.getApiKeyForProvider(provider).trim()
+        val sourceLangObj = LanguageCatalog.findByCode(sourceLanguageCode)
+        val targetLangObj = LanguageCatalog.findByCode(targetLanguageCode)
+
+        return try {
+            when (provider) {
+                KothonPreferences.PROVIDER_NVIDIA -> {
+                    if (customKey.isBlank()) throw IOException("NVIDIA API key is missing.")
+                    refineWithNvidiaNim(trimmed, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
+                }
+                KothonPreferences.PROVIDER_GROQ -> {
+                    if (customKey.isBlank()) throw IOException("Groq API key is missing.")
+                    refineWithGroq(trimmed, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
+                }
+                KothonPreferences.PROVIDER_OPENAI -> {
+                    if (customKey.isBlank()) throw IOException("OpenAI API key is missing.")
+                    refineWithOpenAi(trimmed, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
+                }
+                else -> {
+                    refineWithGemini(trimmed, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("TranscriptionClient", "Text refinement failed via $provider: ${e.message}")
+            if (provider != KothonPreferences.PROVIDER_GEMINI) {
+                try {
+                    refineWithGemini(trimmed, "", sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
+                } catch (fallbackEx: Exception) {
+                    throw IOException("$provider error: ${e.message}. (Gemini fallback: ${fallbackEx.message})", e)
+                }
+            } else {
+                throw (e as? IOException) ?: IOException(e.message ?: "Refinement error", e)
+            }
+        }
     }
 
     @Throws(IOException::class)
@@ -294,9 +350,10 @@ class TranscriptionClient(private val context: Context) {
 
         for (model in geminiFallbackModels) {
             try {
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
                 val request = Request.Builder()
                     .url(url)
+                    .addHeader("x-goog-api-key", apiKey)
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
@@ -340,6 +397,121 @@ class TranscriptionClient(private val context: Context) {
         }
 
         throw (lastException as? IOException) ?: IOException("Gemini transcription failed across all fallback models: ${lastException?.message}", lastException)
+    }
+
+    private fun refineWithGemini(
+        rawText: String,
+        customKey: String,
+        sourceLangName: String,
+        targetLangName: String,
+        targetLangCode: String,
+        tone: String,
+        removeFillers: Boolean,
+        fixGrammar: Boolean
+    ): TranscriptionResult {
+        val apiKey = if (customKey.isNotEmpty()) customKey else BuildConfig.GEMINI_API_KEY
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            throw IOException("Gemini API key is not configured. Please enter your API key in Settings.")
+        }
+
+        val translationInstruction = if (targetLangCode == "original") {
+            "Keep the output in the same detected language as spoken. Do NOT translate."
+        } else {
+            "Translate the refined speech into $targetLangName."
+        }
+
+        val systemInstructionText = """
+            You are Kothon AI, a precision voice transcription and professional refinement engine.
+            Your task is strictly to polish the provided raw spoken text transcript.
+            RULES:
+            1. Punctuate, capitalize, and polish into tone: $tone.
+            2. If Remove Fillers is true, strip stuttering and filler words (e.g. 'um', 'uh', 'mane', 'ar ki', 'you know').
+            3. If Fix Grammar is true, correct grammar, spelling, and tense agreement.
+            4. $translationInstruction
+            5. Return strictly JSON: {"detected_language": "<Language>", "refined_text": "<Output text>"}
+               Do not return nested language arrays. Output the final refined sentence directly in "refined_text".
+        """.trimIndent()
+
+        val userPrompt = "Refine the transcript: \"$rawText\". Expected language: $sourceLangName. Target language: $targetLangName. Tone: $tone. Remove fillers: $removeFillers. Fix grammar: $fixGrammar."
+
+        val jsonBody = JSONObject().apply {
+            put("system_instruction", JSONObject().apply {
+                put("parts", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("text", systemInstructionText)
+                    })
+                })
+            })
+            val contents = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    val parts = JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("text", userPrompt)
+                        })
+                    }
+                    put("parts", parts)
+                })
+            }
+            put("contents", contents)
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.15)
+                put("maxOutputTokens", 1000)
+            })
+        }
+
+        var lastException: Exception? = null
+
+        for (model in geminiFallbackModels) {
+            try {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
+                val request = Request.Builder()
+                    .url(url)
+                    .addHeader("x-goog-api-key", apiKey)
+                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                httpClient.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string() ?: ""
+                    if (!response.isSuccessful) {
+                        val errMsg = try {
+                            JSONObject(responseBody).getJSONObject("error").getString("message")
+                        } catch (e: Exception) {
+                            responseBody
+                        }
+                        if (response.code == 404 || response.code == 429 || response.code == 503) {
+                            Log.w("TranscriptionClient", "Gemini text model $model returned ${response.code}, falling back...")
+                            return@use
+                        }
+                        throw IOException("Gemini error (${response.code}): $errMsg")
+                    }
+
+                    val jsonResponse = JSONObject(responseBody)
+                    val candidates = jsonResponse.optJSONArray("candidates") ?: JSONArray()
+                    if (candidates.length() > 0) {
+                        val contentObj = candidates.getJSONObject(0).getJSONObject("content")
+                        val parts = contentObj.getJSONArray("parts")
+                        val sb = StringBuilder()
+                        for (p in 0 until parts.length()) {
+                            val part = parts.getJSONObject(p)
+                            if (part.optBoolean("thought", false)) continue
+                            val textPart = part.optString("text", "")
+                            if (textPart.isNotBlank()) {
+                                sb.append(textPart)
+                            }
+                        }
+                        val resultText = sb.toString().trim()
+                        if (resultText.isNotEmpty()) {
+                            return parseUniversalOutput(resultText, targetLangName, targetLangCode, tone).copy(rawTranscript = rawText)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                lastException = e
+            }
+        }
+
+        throw (lastException as? IOException) ?: IOException("Gemini text refinement failed across fallback models: ${lastException?.message}", lastException)
     }
 
     /**
@@ -605,6 +777,19 @@ class TranscriptionClient(private val context: Context) {
             throw IOException("No speech detected by Groq Whisper. Please speak clearly into the mic.")
         }
 
+        return refineWithGroq(rawTranscript, apiKey, sourceLangName, targetLangName, targetLangCode, tone, removeFillers, fixGrammar)
+    }
+
+    private fun refineWithGroq(
+        rawTranscript: String,
+        apiKey: String,
+        sourceLangName: String,
+        targetLangName: String,
+        targetLangCode: String,
+        tone: String,
+        removeFillers: Boolean,
+        fixGrammar: Boolean
+    ): TranscriptionResult {
         val translationPrompt = if (targetLangCode == "original") {
             "Keep the output in the same language as spoken."
         } else {

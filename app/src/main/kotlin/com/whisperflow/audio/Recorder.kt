@@ -26,6 +26,8 @@ class Recorder(private val context: Context) {
             stop()
         }
 
+        cleanupStaleRecordings()
+
         val targetFile = outputFile ?: File(
             context.cacheDir,
             "kothon_audio_${System.currentTimeMillis()}.m4a"
@@ -67,7 +69,27 @@ class Recorder(private val context: Context) {
         } catch (e: Exception) {
             Log.e("KothonRecorder", "Failed to start MediaRecorder", e)
             cleanup()
+            try {
+                targetFile.delete()
+            } catch (ignored: Exception) {}
+            currentOutputFile = null
             throw IOException("Failed to start audio recording: ${e.message}", e)
+        }
+    }
+
+    fun cleanupStaleRecordings() {
+        try {
+            val cache = context.cacheDir ?: return
+            val now = System.currentTimeMillis()
+            cache.listFiles { file ->
+                file.name.startsWith("kothon_audio_") && file.name.endsWith(".m4a")
+            }?.forEach { staleFile ->
+                if (now - staleFile.lastModified() > 180000L) { // older than 3 minutes
+                    staleFile.delete()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("KothonRecorder", "Notice during stale audio cleanup: ${e.message}")
         }
     }
 

@@ -55,6 +55,14 @@ android {
       signingConfig = signingConfigs.getByName("debugConfig")
     }
   }
+
+  applicationVariants.configureEach { variant ->
+    if (variant.buildType.name == "debug") {
+      variant.outputs.configureEach {
+        outputFileName = "kothon_v0.3.apk"
+      }
+    }
+  }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11

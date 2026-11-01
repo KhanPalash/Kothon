@@ -3,4 +3,20 @@
     <string name="ime_name">Kothon Voice Keyboard</string>
     <string name="settings_title">Kothon Settings</string>
     <string name="mic_permission_required">Microphone permission is required to transcribe your voice.</string>
+
+    <string name="settings_dictation_section">Dictation</string>
+    <string name="settings_dictation_section_desc">Accurate records audio and uses AI transcription. Live types while you speak.</string>
+    <string name="settings_live_enabled">Enable Live Dictation (Beta)</string>
+    <string name="settings_live_enabled_desc">Live typing uses the device speech recognizer. Beta; Accurate stays available as fallback.</string>
+    <string name="settings_dictation_mode">Dictation Mode</string>
+    <string name="settings_auto_refine">Auto-refine live text</string>
+    <string name="settings_auto_refine_desc">After you stop, send live text to the AI provider for grammar and translation.</string>
+    <string name="settings_prefer_on_device">Prefer on-device recognition</string>
+    <string name="settings_prefer_on_device_desc">Use the on-device speech model when Android 12+ offers it.</string>
+    <string name="settings_wifi_only">Wi-Fi only model download</string>
+    <string name="settings_wifi_only_desc">Ask before downloading a speech model over cellular data.</string>
+    <string name="settings_live_language">Live recognizer language</string>
+    <string name="settings_live_language_desc">Auto Detect is never sent to the recognizer; pick the spoken language here.</string>
+    <string name="settings_check_model">Check / Download On-Device Model</string>
+    <string name="settings_privacy_note">Live text is sent to your selected AI provider only when auto-refine is on. Raw speech text is never logged.</string>
 </resources>

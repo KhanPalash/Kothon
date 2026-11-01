@@ -73,8 +73,14 @@ fun VoiceButton(
     sourceLanguageCode: String = "auto",
     targetLanguageCode: String = "en",
     tone: String = "Professional Clarity",
+    modeLabel: String = "",
+    voiceDisabled: Boolean = false,
+    canUndo: Boolean = false,
+    canRefine: Boolean = false,
     onRecordStart: () -> Unit = {},
     onRecordStop: () -> Unit = {},
+    onUndo: () -> Unit = {},
+    onRefine: () -> Unit = {},
     onToggleLanguages: () -> Unit = {},
     onCycleTone: () -> Unit = {},
     onSwitchToKeyboard: () -> Unit = {},
@@ -101,7 +107,7 @@ fun VoiceButton(
             VoiceButtonState.SUCCESS -> Color(0xFF10B981)
             VoiceButtonState.ERROR -> Color(0xFFF97316)
             VoiceButtonState.PERMISSION_REQUIRED -> Color(0xFFEAB308)
-        },
+        }.let { if (voiceDisabled) Color(0xFF475569) else it },
         label = "bgColor"
     )
 
@@ -212,13 +218,17 @@ fun VoiceButton(
 
             // Real-time status / transcription hint
             Text(
-                text = when (state) {
-                    VoiceButtonState.IDLE -> "Speak in ${sourceLang.name} → Output ${targetLang.name}"
-                    VoiceButtonState.RECORDING -> "Listening... Speak naturally"
-                    VoiceButtonState.PROCESSING -> "Detecting language, refining & translating..."
-                    VoiceButtonState.SUCCESS -> statusMessage.ifEmpty { "Transcribed, refined and inserted!" }
-                    VoiceButtonState.ERROR -> statusMessage.ifEmpty { "Failed. Tap to retry or use keyboard." }
-                    VoiceButtonState.PERMISSION_REQUIRED -> "Microphone permission needed. Tap to allow."
+                text = when {
+                    voiceDisabled -> "Voice disabled for password fields."
+                    state == VoiceButtonState.IDLE -> {
+                        val modePrefix = if (modeLabel.isBlank()) "" else "$modeLabel • "
+                        "${modePrefix}Speak in ${sourceLang.name} → Output ${targetLang.name}"
+                    }
+                    state == VoiceButtonState.RECORDING -> "Listening... Speak naturally"
+                    state == VoiceButtonState.PROCESSING -> "Detecting language, refining & translating..."
+                    state == VoiceButtonState.SUCCESS -> statusMessage.ifEmpty { "Transcribed, refined and inserted!" }
+                    state == VoiceButtonState.ERROR -> statusMessage.ifEmpty { "Failed. Tap to retry or use keyboard." }
+                    else -> "Microphone permission needed. Tap to allow."
                 },
                 color = when (state) {
                     VoiceButtonState.RECORDING -> Color(0xFFF87171)
@@ -236,6 +246,46 @@ fun VoiceButton(
                     .padding(vertical = 4.dp)
                     .testTag("voice_button_status_text")
             )
+
+            // Undo / manual refine actions after a completed live session
+            if (canUndo || canRefine) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    if (canUndo) {
+                        Text(
+                            text = "Undo",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF1E293B))
+                                .clickable { onUndo() }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .testTag("live_undo_button")
+                        )
+                    }
+                    if (canRefine) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Refine with AI",
+                            color = Color(0xFFFBBF24),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF1E293B))
+                                .clickable { onRefine() }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .testTag("live_refine_button")
+                        )
+                    }
+                }
+            }
 
             // Dynamic Waveform Visualizer when recording
             if (state == VoiceButtonState.RECORDING) {
@@ -293,9 +343,12 @@ fun VoiceButton(
                         .size(64.dp)
                         .clip(CircleShape)
                         .background(buttonBgColor)
-                        .pointerInput(state) {
+                        .pointerInput(state, voiceDisabled) {
                             detectTapGestures(
                                 onPress = {
+                                    if (voiceDisabled) {
+                                        return@detectTapGestures
+                                    }
                                     if (state == VoiceButtonState.PERMISSION_REQUIRED) {
                                         onRequestPermission()
                                         return@detectTapGestures
@@ -324,8 +377,16 @@ fun VoiceButton(
                         }
                         .testTag("main_voice_action_button")
                 ) {
-                    when (state) {
-                        VoiceButtonState.RECORDING -> {
+                    when {
+                        voiceDisabled -> {
+                            Icon(
+                                imageVector = Icons.Default.MicOff,
+                                contentDescription = "Voice Disabled",
+                                tint = Color(0xFFE2E8F0),
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                        state == VoiceButtonState.RECORDING -> {
                             Icon(
                                 imageVector = Icons.Default.Stop,
                                 contentDescription = "Stop Recording",
@@ -333,14 +394,14 @@ fun VoiceButton(
                                 modifier = Modifier.size(30.dp)
                             )
                         }
-                        VoiceButtonState.PROCESSING -> {
+                        state == VoiceButtonState.PROCESSING -> {
                             CircularProgressIndicator(
                                 color = Color.White,
                                 strokeWidth = 3.dp,
                                 modifier = Modifier.size(30.dp)
                             )
                         }
-                        VoiceButtonState.PERMISSION_REQUIRED -> {
+                        state == VoiceButtonState.PERMISSION_REQUIRED -> {
                             Icon(
                                 imageVector = Icons.Default.MicOff,
                                 contentDescription = "Permission Required",
@@ -348,7 +409,7 @@ fun VoiceButton(
                                 modifier = Modifier.size(30.dp)
                             )
                         }
-                        VoiceButtonState.ERROR -> {
+                        state == VoiceButtonState.ERROR -> {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
                                 contentDescription = "Retry Recording",
