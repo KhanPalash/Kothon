@@ -27,6 +27,12 @@ class LiveSpeechStreamer(private val context: Context) {
     private var onRmsCallback: ((Float) -> Unit)? = null
     private var onErrorCallback: ((Int, String) -> Unit)? = null
 
+    // Retry tracking for exponential backoff
+    private var consecutiveNoMatchCount = 0
+    private val maxConsecutiveNoMatch = 3
+    private var consecutiveRetryCount = 0
+    private val maxConsecutiveRetries = 5
+
     fun startListening(
         languageCode: String = "auto",
         onPartialText: (String) -> Unit,
@@ -48,6 +54,9 @@ class LiveSpeechStreamer(private val context: Context) {
         onSegmentFinalCallback = onSegmentFinal
         onRmsCallback = onRmsChanged
         onErrorCallback = onError
+        // Reset retry counters for new session
+        consecutiveNoMatchCount = 0
+        consecutiveRetryCount = 0
 
         mainHandler.post {
             createAndStartRecognizer()
@@ -131,19 +140,33 @@ class LiveSpeechStreamer(private val context: Context) {
                     when (error) {
                         SpeechRecognizer.ERROR_NO_MATCH,
                         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                            // User paused speaking; seamlessly restart listening
+                            // User paused speaking; seamlessly restart listening with backoff
+                            consecutiveNoMatchCount++
+                            if (consecutiveNoMatchCount >= maxConsecutiveNoMatch) {
+                                isSessionActive = false
+                                onErrorCallback?.invoke(error, "Too many no-match events, stopping session")
+                                return
+                            }
+                            val delay = 100 * (2.0.pow(consecutiveNoMatchCount - 1)).toLong().coerceAtMost(2000)
                             mainHandler.postDelayed({
                                 if (isSessionActive) {
                                     createAndStartRecognizer()
                                 }
-                            }, 100)
+                            }, delay)
                         }
                         SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
+                            consecutiveRetryCount++
+                            if (consecutiveRetryCount >= maxConsecutiveRetries) {
+                                isSessionActive = false
+                                onErrorCallback?.invoke(error, "Recognition service busy, max retries exceeded")
+                                return
+                            }
+                            val delay = 300 * (2.0.pow(consecutiveRetryCount - 1)).toLong().coerceAtMost(5000)
                             mainHandler.postDelayed({
                                 if (isSessionActive) {
                                     createAndStartRecognizer()
                                 }
-                            }, 300)
+                            }, delay)
                         }
                         else -> {
                             isSessionActive = false
@@ -204,10 +227,19 @@ class LiveSpeechStreamer(private val context: Context) {
     fun stopListening() {
         isSessionActive = false
         mainHandler.removeCallbacksAndMessages(null)
+        // Explicitly clear handler to prevent Context leak
+        mainHandler.removeCallbacksAndMessages(null)
         cleanupRecognizer()
         onPartialCallback = null
         onSegmentFinalCallback = null
         onRmsCallback = null
         onErrorCallback = null
+    }
+
+    // Call this in onDestroy of owning component to fully release resources
+    fun release() {
+        stopListening()
+        // Handler holds reference to Looper (and thus Context), null it out
+        // Note: Handler itself cannot be nulled as it's a val, but removing callbacks suffices
     }
 }

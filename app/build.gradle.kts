@@ -56,11 +56,10 @@ android {
     }
   }
 
-  applicationVariants.configureEach { variant ->
-    if (variant.buildType.name == "debug") {
-      variant.outputs.configureEach {
-        outputFileName = "kothon_v0.3.apk"
-      }
+  
+  tasks.withType<com.android.build.gradle.tasks.PackageApplication> {
+    if (name == "packageDebug") {
+      archiveFileName.set("kothon_v0.3.apk")
     }
   }
   compileOptions {

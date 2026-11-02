@@ -21,38 +21,28 @@ object KeyStoreHelper {
     private const val GCM_TAG_LENGTH = 128
     private const val ENCRYPTED_PREFIX = "ENC:"
 
-    // Fallback key for non-Android / JVM test runner environments
-    private val jvmFallbackKey: SecretKey by lazy {
-        SecretKeySpec("KothonJvmTestKey1234567890123456".toByteArray(Charsets.UTF_8), "AES")
-    }
-
     private fun getOrCreateSecretKey(): SecretKey {
-        return try {
-            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-            if (!keyStore.containsAlias(KEY_ALIAS)) {
-                val keyGenerator = KeyGenerator.getInstance(
-                    KeyProperties.KEY_ALGORITHM_AES,
-                    ANDROID_KEYSTORE
-                )
-                val keyGenParameterSpec = KeyGenParameterSpec.Builder(
-                    KEY_ALIAS,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(256)
-                    .build()
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        if (!keyStore.containsAlias(KEY_ALIAS)) {
+            val keyGenerator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES,
+                ANDROID_KEYSTORE
+            )
+            val keyGenParameterSpec = KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
 
-                keyGenerator.init(keyGenParameterSpec)
-                keyGenerator.generateKey()
-            } else {
-                val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
-                entry?.secretKey ?: jvmFallbackKey
-            }
-        } catch (e: Exception) {
-            Log.d("KeyStoreHelper", "AndroidKeyStore unavailable, using fallback: ${e.message}")
-            jvmFallbackKey
+            keyGenerator.init(keyGenParameterSpec)
+            keyGenerator.generateKey()
         }
+        val entry = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
+        return entry?.secretKey
+            ?: throw IllegalStateException("AndroidKeyStore key missing or inaccessible")
     }
 
     fun encrypt(plainText: String): String {

@@ -47,8 +47,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.alpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -142,12 +150,16 @@ fun VoiceButton(
                         .background(Color(0xFF1E293B))
                         .clickable { onToggleLanguages() }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
-                        .testTag("translate_toggle_chip"),
+                        .testTag("translate_toggle_chip")
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = "Language pair: ${sourceLang.name} to ${targetLang.name}. Tap to change."
+                        },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Translate,
-                        contentDescription = "Language Pair",
+                        contentDescription = "",
                         tint = Color(0xFF38BDF8),
                         modifier = Modifier.size(15.dp)
                     )
@@ -167,12 +179,16 @@ fun VoiceButton(
                         .background(Color(0xFF1E293B))
                         .clickable { onCycleTone() }
                         .padding(horizontal = 8.dp, vertical = 6.dp)
-                        .testTag("cycle_tone_chip"),
+                        .testTag("cycle_tone_chip")
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = "AI tone: $tone. Tap to cycle."
+                        },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Tone",
+                        contentDescription = "",
                         tint = Color(0xFFFBBF24),
                         modifier = Modifier.size(13.dp)
                     )
@@ -191,12 +207,16 @@ fun VoiceButton(
                     IconButton(
                         onClick = onSwitchToKeyboard,
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(48.dp)
                             .testTag("switch_to_keyboard_button")
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = "Switch to QWERTY keyboard"
+                            }
                     ) {
                         Icon(
                             imageVector = Icons.Default.Keyboard,
-                            contentDescription = "Switch to QWERTY Keyboard",
+                            contentDescription = "",
                             tint = Color(0xFF94A3B8)
                         )
                     }
@@ -204,12 +224,16 @@ fun VoiceButton(
                     IconButton(
                         onClick = onOpenSettings,
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(48.dp)
                             .testTag("open_settings_button")
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = "Open Kothon settings"
+                            }
                     ) {
                         Icon(
                             imageVector = Icons.Default.Settings,
-                            contentDescription = "Kothon Settings",
+                            contentDescription = "",
                             tint = Color(0xFF94A3B8)
                         )
                     }
@@ -245,6 +269,9 @@ fun VoiceButton(
                     .fillMaxWidth()
                     .padding(vertical = 4.dp)
                     .testTag("voice_button_status_text")
+                    .semantics {
+                        liveRegion = LiveRegionMode.Polite
+                    }
             )
 
             // Undo / manual refine actions after a completed live session
@@ -265,8 +292,12 @@ fun VoiceButton(
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(Color(0xFF1E293B))
                                 .clickable { onUndo() }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .padding(horizontal = 12.dp, vertical = 12.dp)
                                 .testTag("live_undo_button")
+                                .semantics {
+                                    role = Role.Button
+                                    contentDescription = "Undo last transcription"
+                                }
                         )
                     }
                     if (canRefine) {
@@ -280,8 +311,12 @@ fun VoiceButton(
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(Color(0xFF1E293B))
                                 .clickable { onRefine() }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .padding(horizontal = 12.dp, vertical = 12.dp)
                                 .testTag("live_refine_button")
+                                .semantics {
+                                    role = Role.Button
+                                    contentDescription = "Refine transcription with AI"
+                                }
                         )
                     }
                 }
@@ -337,6 +372,15 @@ fun VoiceButton(
                 // Main Core Button
                 var pressStartTime by remember { mutableStateOf<Long>(0L) }
 
+                val mainButtonContentDescription = when {
+                    voiceDisabled -> "Voice disabled"
+                    state == VoiceButtonState.RECORDING -> "Stop recording"
+                    state == VoiceButtonState.PROCESSING -> "Processing speech"
+                    state == VoiceButtonState.PERMISSION_REQUIRED -> "Permission required, tap to request"
+                    state == VoiceButtonState.ERROR -> "Error, tap to retry"
+                    else -> "Record voice"
+                }
+
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
@@ -376,12 +420,16 @@ fun VoiceButton(
                             )
                         }
                         .testTag("main_voice_action_button")
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = mainButtonContentDescription
+                        }
                 ) {
                     when {
                         voiceDisabled -> {
                             Icon(
                                 imageVector = Icons.Default.MicOff,
-                                contentDescription = "Voice Disabled",
+                                contentDescription = "",
                                 tint = Color(0xFFE2E8F0),
                                 modifier = Modifier.size(30.dp)
                             )
@@ -389,7 +437,7 @@ fun VoiceButton(
                         state == VoiceButtonState.RECORDING -> {
                             Icon(
                                 imageVector = Icons.Default.Stop,
-                                contentDescription = "Stop Recording",
+                                contentDescription = "",
                                 tint = Color.White,
                                 modifier = Modifier.size(30.dp)
                             )
@@ -404,7 +452,7 @@ fun VoiceButton(
                         state == VoiceButtonState.PERMISSION_REQUIRED -> {
                             Icon(
                                 imageVector = Icons.Default.MicOff,
-                                contentDescription = "Permission Required",
+                                contentDescription = "",
                                 tint = Color(0xFF0F172A),
                                 modifier = Modifier.size(30.dp)
                             )
@@ -412,7 +460,7 @@ fun VoiceButton(
                         state == VoiceButtonState.ERROR -> {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
-                                contentDescription = "Retry Recording",
+                                contentDescription = "",
                                 tint = Color.White,
                                 modifier = Modifier.size(30.dp)
                             )
@@ -420,9 +468,9 @@ fun VoiceButton(
                         else -> {
                             Icon(
                                 imageVector = Icons.Default.Mic,
-                                contentDescription = "Record Voice",
-                                tint = Color(0xFF0F172A),
+                                contentDescription = "",
                                 modifier = Modifier.size(34.dp)
+                                    .graphicsLayer { alpha = if (state == VoiceButtonState.IDLE) 1f else 0.5f }
                             )
                         }
                     }
