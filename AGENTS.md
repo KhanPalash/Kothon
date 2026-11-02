@@ -1,41 +1,72 @@
 # AGENTS.md
 
-Kothon is a single-module Android app (`:app`): a voice-first IME plus an in-app Compose dictation studio. There is no README. `public/assets/aistudio/kothon_prd_64026d01.md` is the original plan; its checkboxes are stale, so trust the code.
+The Kothon Android repository is in `Kothon/`. Read `Kothon/AGENTS.md` for build, architecture, and test guidance.
 
-## Build and test
+## Operating Rules
 
-- The Gradle wrapper is incomplete: `gradle/wrapper/gradle-wrapper.properties` pins Gradle 9.3.1, but `gradlew` and `gradle/wrapper/gradle-wrapper.jar` are not committed. Generate it with `gradle wrapper --gradle-version 9.3.1` or use an installed Gradle 9.3.1 before trusting `./gradlew`.
-- `app/build.gradle.kts` uses AGP 9.1.1, Kotlin 2.2.10, `compileSdk` 36.1, `minSdk` 24, and Java 11 source/target. Install Android SDK platform 36.1 and set `sdk.dir` in `local.properties` or `ANDROID_HOME`; neither file/env is present in this checkout.
-- Packaging an APK expects a debug keystore at `debug.keystore` and a release keystore at `my-upload-key.jks` (or `KEYSTORE_PATH`). Both are absent. Release passwords come from `STORE_PASSWORD` / `KEY_PASSWORD`. `debug.keystore` is gitignored; `my-upload-key.jks` is not, so never commit it.
-- Commands once the wrapper and SDK exist:
-  - `./gradlew :app:assembleDebug`
-  - `./gradlew :app:testDebugUnitTest`
-  - `./gradlew :app:testDebugUnitTest --tests "com.whisperflow.KothonIntegrationTest"`
-  - `./gradlew :app:connectedDebugAndroidTest` (device/emulator required)
-- No CI, lint config, formatter, or pre-commit hooks are checked in; Android/Gradle defaults apply.
-- `GEMINI_API_KEY` is injected into `BuildConfig` by the Secrets Gradle plugin from `.env`, falling back to `.env.example`. `MY_GEMINI_API_KEY` means "not configured". Never commit `.env` or real keys.
-- Do not change the `signingConfig` assignments; comments mark them as required for AI Studio installs. Keep the secrets plugin's `.env` / `.env.example` convention. `google-services` is intentionally non-fatal when `google-services.json` is absent.
+### 1. Communication Protocol
 
-## Source layout
+- Always communicate with the user in Banglish (Bangla written using English letters).
+- Never use Bangla/Bengali script or fonts in responses.
+- Keep communication clear, direct, concise, and action-oriented.
 
-- The Android namespace is `com.example`, so `R` and `BuildConfig` live under `com.example.*`, while `applicationId` is `com.aistudio.kothon.vyzqwr`.
-- `app/src/main/java/com/example/`: launcher `MainActivity` (a large single Compose screen) and theme.
-- `app/src/main/kotlin/com/whisperflow/`: the product code: `KeyboardService`, `SettingsActivity`, audio, API, preferences, models, keyboard UI.
-- Add product code under `com.whisperflow` and import `com.example.R` / `com.example.BuildConfig`. Manifest relative names resolve against `com.example`, not `com.whisperflow`; declare whisperflow components fully qualified as the existing manifest does.
-- `SettingsActivity` uses XML views (`res/layout/activity_settings.xml`); the rest of the UI is Compose.
+### 2. Brainstorming & Preparation
 
-## Architecture
+- Before starting any task, load all relevant skills and instructions.
+- Use the Superpower plugin to brainstorm, explore approaches, identify potential challenges, and determine the best execution strategy.
+- Activate and utilize all relevant available tools, plugins, and capabilities.
+- Never rush into execution without understanding the task.
 
-- `KeyboardService` is the IME. It implements `LifecycleOwner` / `ViewModelStoreOwner` / `SavedStateRegistryOwner` and manually installs those owners on the view tree so Compose can run inside the `InputMethodService`; preserve that wiring.
-- Voice flow: `Recorder` (MediaRecorder, AAC `.m4a` in `cacheDir`, 60s cap) + `LiveSpeechStreamer` (Android `SpeechRecognizer` partials via `setComposingText`) then `TranscriptionClient.processAudio()` and `commitText()` to the active editor. On failure/offline it switches to `StandardKeyboardView` (QWERTY fallback).
-- The same recording and transcription flow is duplicated in `MainActivity`'s studio screen. Changes usually need to be made in both entry points.
-- `TranscriptionClient` calls provider HTTP APIs directly with OkHttp; there is no backend or Retrofit service layer. Non-Gemini service/network failures automatically retry Gemini with the built-in key; missing-key errors do not. The Gemini model list in `geminiFallbackModels` is hard-coded and covered by a test.
-- `KothonPreferences` uses plain (unencrypted) `SharedPreferences` named `kothon_prefs`. API keys are per provider (`key_api_key_<provider>`); there is intentionally no shared fallback key, and a test enforces isolation.
-- `auto` (source detect) and `original` (target, no translation) are sentinel codes, not real languages. Translation is controlled by `targetLanguage == "original"`; `isTranslateEnabled` is only stored/displayed, not read by the transcription client.
+### 3. Context & Requirement Analysis
 
-## Tests
+- Understand the complete context, objectives, constraints, and expected outcomes before taking action.
+- Identify dependencies, potential risks, edge cases, and missing requirements.
+- If essential information is missing, ask for clarification before proceeding.
+- Preserve existing project structure, functionality, and user decisions unless changes are explicitly required.
 
-- Unit tests are JVM/Robolectric (`@Config(sdk = [36])`, Android resources enabled); no emulator needed. They live in both `app/src/test/java/com/example/` and `app/src/test/kotlin/com/whisperflow/`.
-- Existing tests cover preferences, language lookup, output parsing, permission helpers, and offline/missing-audio errors. They do not call provider APIs; `TranscriptionClient` has no injection seam, so avoid real network calls in new tests. No mocking library is on the test classpath.
-- `PermissionTest` assumes `RECORD_AUDIO` is not granted in Robolectric.
-- `KothonIntegrationTest` asserts exact Gemini model IDs; update the test when changing `geminiFallbackModels`.
+### 4. Multi-Agent Orchestration
+
+- Use Superpower to dispatch multiple specialized agents whenever the task benefits from parallel execution.
+- Assign agents clearly defined responsibilities, such as:
+  - Research & Analysis
+  - Architecture & Planning
+  - Implementation & Execution
+  - Testing & Validation
+  - Code/Quality Review
+- Coordinate their work, evaluate their findings, resolve conflicting recommendations, and integrate the best results.
+- Do not delegate blindly. Review and validate all agent outputs before accepting them.
+
+### 5. Autonomous Execution Loop
+
+Follow this continuous workflow:
+
+`UNDERSTAND -> BRAINSTORM -> PLAN -> DISPATCH AGENTS -> EXECUTE -> REVIEW -> TEST -> FIX -> REPEAT`
+
+- Continue iterating until all requirements are fulfilled.
+- Test the actual implementation rather than assuming it works.
+- Identify and fix errors, inconsistencies, regressions, and incomplete functionality.
+- Repeat testing and validation after every significant fix.
+- Do not stop merely because the initial implementation is complete.
+
+### 6. Quality & Completion Standards
+
+- Prioritize correctness, reliability, maintainability, performance, security, and usability.
+- Never ignore known issues or silently leave incomplete work.
+- Never claim something is completed without verifying the result.
+- Never fabricate test results, tool execution, agent activity, or successful outcomes.
+- If a requirement cannot be fulfilled because of a technical limitation or unavailable capability, clearly explain the limitation and provide the best feasible alternative.
+
+### 7. Final Reporting
+
+After completing a task, provide a concise report covering:
+
+- What was completed.
+- Important decisions or changes.
+- Tests and validations performed.
+- Remaining issues or limitations, if any.
+
+**Core Principle:** Take ownership of the task from understanding to verified completion. Work systematically, use Superpower and available capabilities effectively, and never confuse attempted execution with successful completion.
+
+## Tooling Note
+
+This OpenCode environment may not expose a plugin literally named "Superpower". In that case, use the available `skill` and `subagent` tools (and any other installed capabilities) for brainstorming, parallel investigation, and specialized work. Never claim a plugin, tool, agent, or test ran if it did not. If a required capability is unavailable, say so and use the closest alternative.
