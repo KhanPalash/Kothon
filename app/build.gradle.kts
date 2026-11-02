@@ -57,15 +57,18 @@ android {
   }
 
   
-  tasks.withType<com.android.build.gradle.tasks.PackageApplication> {
-    if (name == "packageDebug") {
-      archiveFileName.set("kothon_v0.3.apk")
-    }
-  }
+
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
   }
+
+  tasks.withType<com.android.build.gradle.tasks.PackageApplication>().configureEach { task ->
+    if (task.name == "packageDebug") {
+        task.outputFileName.set("kothon_v0.3.apk")
+    }
+  }
+
   buildFeatures {
     compose = true
     buildConfig = true
