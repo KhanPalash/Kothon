@@ -23,13 +23,20 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -41,10 +48,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Mic
@@ -59,8 +66,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -70,6 +76,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -86,11 +93,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -126,6 +141,13 @@ import com.whisperflow.model.LanguageCatalog
 import com.whisperflow.settings.KothonPreferences
 import com.whisperflow.settings.SettingsActivity
 import com.whisperflow.ui.LanguageSelectorBottomSheet
+import com.whisperflow.ui.BrandFooter
+import com.whisperflow.ui.KothonCard
+import com.whisperflow.ui.KothonChip
+import com.whisperflow.ui.KothonLanguagePill
+import com.whisperflow.ui.KothonModeSegment
+import com.whisperflow.ui.KothonSettingSwitchRow
+import com.whisperflow.ui.KothonStatusPill
 import com.whisperflow.ui.MicrophonePermissionDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -148,7 +170,10 @@ data class RefinedStudioNote(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
         setContent {
             MyApplicationTheme {
                 KothonAppScreen()
@@ -254,6 +279,7 @@ fun KothonAppScreen() {
     var studioError by remember { mutableStateOf<String?>(null) }
     var testInputText by remember { mutableStateOf("") }
     var showRawComparison by remember { mutableStateOf(false) }
+    var refinementExpanded by remember { mutableStateOf(false) }
     var liveEnabled by remember { mutableStateOf(preferences.liveDictationEnabled) }
     var dictationMode by remember { mutableStateOf(preferences.dictationMode) }
     var autoRefine by remember { mutableStateOf(preferences.liveAutoRefine) }
@@ -303,6 +329,7 @@ fun KothonAppScreen() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                refreshImeStatus()
                 liveEnabled = preferences.liveDictationEnabled
                 dictationMode = preferences.dictationMode
                 autoRefine = preferences.liveAutoRefine
@@ -569,44 +596,70 @@ fun KothonAppScreen() {
         }
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = KothonDarkBg,
-        topBar = {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(KothonDarkBg)
+    ) {
+        Image(
+            painter = painterResource(R.drawable.brand_logo),
+            contentDescription = null,
+            alpha = 0.30f,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth(0.66f)
+                .fillMaxHeight(0.5f)
+        )
+
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            topBar = {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
                             .background(KothonCyan),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Mic,
-                            contentDescription = "Kothon Logo",
+                            contentDescription = "Kothon logo",
                             tint = Color(0xFF0F172A),
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
                             text = "Kothon",
                             color = KothonTextPrimary,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.2.sp
                         )
                         Text(
-                            text = "WhisperFlow Voice AI",
-                            color = KothonCyan,
-                            fontSize = 12.sp,
+                            text = when {
+                                isKeyboardSelected -> "Keyboard active"
+                                isKeyboardEnabled -> "Keyboard enabled"
+                                else -> "Voice AI studio"
+                            },
+                            color = when {
+                                isKeyboardSelected -> KothonEmerald
+                                isKeyboardEnabled -> KothonCyan
+                                else -> KothonTextSecondary
+                            },
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Medium
                         )
                     }
@@ -617,7 +670,7 @@ fun KothonAppScreen() {
                         context.startActivity(Intent(context, SettingsActivity::class.java))
                     },
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
                         .background(KothonDarkCard)
                         .testTag("open_settings_header_button")
@@ -625,7 +678,8 @@ fun KothonAppScreen() {
                     Icon(
                         imageVector = Icons.Default.Settings,
                         contentDescription = "Settings",
-                        tint = KothonTextSecondary
+                        tint = KothonTextSecondary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
@@ -634,775 +688,108 @@ fun KothonAppScreen() {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(innerPadding),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // AI Provider Selection & Key Status Card
+            // ---------------------------------------------------------------
+            // 1. Dictation studio (primary action)
+            // ---------------------------------------------------------------
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("ai_provider_card"),
-                    colors = CardDefaults.cardColors(containerColor = KothonDarkSurface),
-                    shape = RoundedCornerShape(16.dp),
-                    border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(KothonBorder))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "AI Provider & Model",
-                                color = KothonTextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(if (selectedProvider == KothonPreferences.PROVIDER_GEMINI || apiKeyText.isNotBlank()) KothonEmerald else KothonAmber)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (selectedProvider == KothonPreferences.PROVIDER_GEMINI) "Built-in Active" else if (apiKeyText.isNotBlank()) "Key Saved" else "Key Required",
-                                    color = if (selectedProvider == KothonPreferences.PROVIDER_GEMINI || apiKeyText.isNotBlank()) KothonEmerald else KothonAmber,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Provider Chips
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            items(KothonPreferences.PROVIDERS) { provider ->
-                                val isSelected = selectedProvider == provider
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = {
-                                        selectedProvider = provider
-                                        preferences.provider = provider
-                                        apiKeyText = preferences.getApiKeyForProvider(provider)
-                                        keyTestResult = null
-                                    },
-                                    label = {
-                                        Text(
-                                            text = if (provider == KothonPreferences.PROVIDER_GEMINI) "Gemini (Built-in)" else provider,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = KothonCyan,
-                                        selectedLabelColor = Color(0xFF0F172A),
-                                        containerColor = KothonDarkCard,
-                                        labelColor = KothonTextSecondary
-                                    )
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Provider Details & Key input
-                        when (selectedProvider) {
-                            KothonPreferences.PROVIDER_GEMINI -> {
-                                Text(
-                                    text = "Google Gemini 3.8 Flash • Multimodal Audio Intelligence • Pre-configured with built-in AI Studio key",
-                                    color = KothonEmerald,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            KothonPreferences.PROVIDER_GROQ -> {
-                                Text(
-                                    text = "Groq Cloud • Whisper-large-v3 + Llama 3.3 70B • Blazing fast inference",
-                                    color = KothonCyan,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            KothonPreferences.PROVIDER_OPENAI -> {
-                                Text(
-                                    text = "OpenAI • Whisper-1 + GPT-4o-mini • High accuracy transcription",
-                                    color = KothonCyan,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            KothonPreferences.PROVIDER_NVIDIA -> {
-                                Text(
-                                    text = "NVIDIA NIM • NVIDIA-Nemotron-3.5-Transcribe-30B-A4B + Nemotron/Llama 3.3 • Live & high-fidelity transcription",
-                                    color = KothonAmber,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-
-                        // API Key input field for non-Gemini or custom Gemini key
-                        if (selectedProvider != KothonPreferences.PROVIDER_GEMINI || showApiKeyInput) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            OutlinedTextField(
-                                value = apiKeyText,
-                                onValueChange = {
-                                    apiKeyText = it
-                                    preferences.setApiKeyForProvider(selectedProvider, it.trim())
-                                    keyTestResult = null
-                                },
-                                placeholder = {
-                                    Text(
-                                        when (selectedProvider) {
-                                            KothonPreferences.PROVIDER_GROQ -> "Enter Groq key (gsk_...)"
-                                            KothonPreferences.PROVIDER_OPENAI -> "Enter OpenAI key (sk-...)"
-                                            KothonPreferences.PROVIDER_NVIDIA -> "Enter NVIDIA key (nvapi-...)"
-                                            else -> "Enter custom Gemini key"
-                                        },
-                                        color = KothonTextMuted,
-                                        fontSize = 13.sp
-                                    )
-                                },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("provider_api_key_input"),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = KothonCyan,
-                                    unfocusedBorderColor = KothonBorder,
-                                    focusedTextColor = KothonTextPrimary,
-                                    unfocusedTextColor = KothonTextPrimary,
-                                    focusedContainerColor = KothonDarkCard,
-                                    unfocusedContainerColor = KothonDarkCard
-                                )
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = {
-                                        scope.launch {
-                                            isTestingKey = true
-                                            val res = withContext(Dispatchers.IO) {
-                                                transcriptionClient.testProviderConnection(selectedProvider, apiKeyText.trim())
-                                            }
-                                            keyTestResult = res
-                                            isTestingKey = false
-                                        }
-                                    },
-                                    enabled = !isTestingKey && apiKeyText.isNotBlank(),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = KothonIndigo,
-                                        contentColor = Color.White
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    if (isTestingKey) {
-                                        CircularProgressIndicator(
-                                            color = Color.White,
-                                            strokeWidth = 2.dp,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                    }
-                                    Text("Test Key", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                }
-
-                                Button(
-                                    onClick = {
-                                        preferences.setApiKeyForProvider(selectedProvider, apiKeyText.trim())
-                                        Toast.makeText(context, "$selectedProvider Key saved!", Toast.LENGTH_SHORT).show()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = KothonCyan,
-                                        contentColor = Color(0xFF0F172A)
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Save Key", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-
-                            // Key Test Result feedback
-                            if (keyTestResult != null) {
-                                val (ok, msg) = keyTestResult!!
-                                Text(
-                                    text = msg,
-                                    color = if (ok) KothonEmerald else KothonRose,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(top = 6.dp)
-                                )
-                            }
-                        } else {
-                            Row(
-                                modifier = Modifier
-                                    .clickable { showApiKeyInput = true }
-                                    .padding(top = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Key,
-                                    contentDescription = "Custom Key",
-                                    tint = KothonTextMuted,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Use custom Gemini API key",
-                                    color = KothonTextMuted,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Source & Target Language Selector Card
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("language_selection_card"),
-                    colors = CardDefaults.cardColors(containerColor = KothonDarkSurface),
-                    shape = RoundedCornerShape(16.dp),
-                    border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(KothonBorder))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Language & Real-Time Translation",
-                                color = KothonTextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Icon(
-                                imageVector = Icons.Default.Translate,
-                                contentDescription = "Translation",
-                                tint = KothonCyan,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        Text(
-                            text = "Choose spoken input language and target translation language. Detects speech automatically.",
-                            color = KothonTextSecondary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
-                        )
-
-                        // Interactive Source & Target Selector with Swap
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Source Language Button
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(56.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(KothonDarkCard)
-                                    .clickable { showLanguageSheetForSource = true }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                                    .testTag("source_language_selector_button"),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Column {
-                                    Text(
-                                        text = "SPEAK IN (SOURCE)",
-                                        color = KothonTextMuted,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = currentSourceLang.flagEmoji, fontSize = 14.sp)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = currentSourceLang.name,
-                                            color = KothonTextPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Swap Languages Button
-                            IconButton(
-                                onClick = {
-                                    if (sourceLangCode != "auto") {
-                                        val temp = sourceLangCode
-                                        sourceLangCode = if (targetLangCode == "original") "en" else targetLangCode
-                                        targetLangCode = temp
-                                        preferences.sourceLanguage = sourceLangCode
-                                        preferences.targetLanguage = targetLangCode
-                                        Toast.makeText(context, "Languages swapped", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, "Cannot swap when Source is Auto Detect", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                modifier = Modifier
-                                    .padding(horizontal = 4.dp)
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF334155))
-                                    .testTag("swap_languages_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.SwapHoriz,
-                                    contentDescription = "Swap Languages",
-                                    tint = KothonCyan,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            // Target Language Button
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(56.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(KothonDarkCard)
-                                    .clickable { showLanguageSheetForTarget = true }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                                    .testTag("target_language_selector_button"),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Column {
-                                    Text(
-                                        text = "OUTPUT (TRANSLATE TO)",
-                                        color = KothonTextMuted,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = currentTargetLang.flagEmoji, fontSize = 14.sp)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = currentTargetLang.name,
-                                            color = KothonCyan,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Advanced Text Refinement & Tone Card
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("advanced_refinement_card"),
-                    colors = CardDefaults.cardColors(containerColor = KothonDarkSurface),
-                    shape = RoundedCornerShape(16.dp),
-                    border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(KothonBorder))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Advanced Shikrito Refinement",
-                                color = KothonTextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = "Refinement",
-                                tint = KothonAmber,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        Text(
-                            text = "Intelligently rephrases transcription to preserve intent while polishing grammar and tone.",
-                            color = KothonTextSecondary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
-                        )
-
-                        // Tone Selector Chips
-                        Text(
-                            text = "Refinement Tone Target",
-                            color = KothonTextMuted,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            val popularTones = listOf(
-                                KothonPreferences.TONE_PROFESSIONAL,
-                                KothonPreferences.TONE_EXECUTIVE,
-                                KothonPreferences.TONE_CONCISE
-                            )
-                            popularTones.forEach { toneName ->
-                                val isSelected = currentTone == toneName
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = {
-                                        currentTone = toneName
-                                        preferences.tone = toneName
-                                    },
-                                    label = {
-                                        Text(
-                                            text = toneName,
-                                            fontSize = 11.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = KothonIndigo,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = KothonDarkCard,
-                                        labelColor = KothonTextSecondary
-                                    )
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Toggle Switches for Refinement
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Eliminate Vocal Fillers",
-                                    color = KothonTextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "Removes 'um', 'uh', 'mane', 'ar ki', and stutters",
-                                    color = KothonTextMuted,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            Switch(
-                                checked = removeFillers,
-                                onCheckedChange = {
-                                    removeFillers = it
-                                    preferences.removeFillers = it
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = KothonCyan
-                                )
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Grammar & Punctuation Polish",
-                                    color = KothonTextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = "Fixes structure, capitalization, and agreements",
-                                    color = KothonTextMuted,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            Switch(
-                                checked = fixGrammar,
-                                onCheckedChange = {
-                                    fixGrammar = it
-                                    preferences.fixGrammar = it
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = KothonCyan
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Dictation mode: ACCURATE (record then refine) or LIVE (stream as you speak)
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("studio_dictation_mode_card"),
-                    colors = CardDefaults.cardColors(containerColor = KothonDarkSurface),
-                    shape = RoundedCornerShape(16.dp),
-                    border = CardDefaults.outlinedCardBorder().copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(KothonBorder)
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
+                KothonCard(modifier = Modifier.testTag("voice_dictation_studio_card")) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Dictation Mode",
-                                    color = KothonTextPrimary,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "LIVE types while you speak. ACCURATE records, then refines with AI.",
-                                    color = KothonTextMuted,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            if (liveModeActive) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(KothonIndigo)
-                                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                                ) {
-                                    Text(
-                                        text = "BETA",
-                                        color = Color.White,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Dictation",
+                                color = KothonTextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${currentSourceLang.name}  →  ${currentTargetLang.name}",
+                                color = KothonTextSecondary,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
+                        // Compact mode segmented control
                         Row(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(KothonDarkCard)
+                                .selectableGroup()
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            FilterChip(
+                            KothonModeSegment(
+                                label = "Accurate",
                                 selected = !liveModeActive,
                                 onClick = { selectDictationMode(KothonPreferences.MODE_ACCURATE) },
-                                label = {
-                                    Text(
-                                        text = "ACCURATE",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = KothonCyan,
-                                    selectedLabelColor = Color(0xFF0F172A),
-                                    containerColor = KothonDarkCard,
-                                    labelColor = KothonTextSecondary
-                                ),
                                 modifier = Modifier.testTag("studio_mode_accurate")
                             )
-                            FilterChip(
+                            KothonModeSegment(
+                                label = "Live",
                                 selected = liveModeActive,
                                 enabled = liveEnabled,
+                                selectedColor = KothonIndigo,
                                 onClick = { selectDictationMode(KothonPreferences.MODE_LIVE) },
-                                label = {
-                                    Text(
-                                        text = "LIVE",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = KothonIndigo,
-                                    selectedLabelColor = Color.White,
-                                    containerColor = KothonDarkCard,
-                                    labelColor = KothonTextSecondary
-                                ),
                                 modifier = Modifier.testTag("studio_mode_live")
                             )
                         }
-
-                        if (!liveEnabled) {
-                            Text(
-                                text = "LIVE is off. Enable \"LIVE dictation (beta)\" in Settings to use it.",
-                                color = KothonAmber,
-                                fontSize = 11.sp,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                        } else if (liveModeActive) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Refine with AI after speaking",
-                                        color = KothonTextPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = "Off: keep the raw live transcript and tap Refine manually.",
-                                        color = KothonTextMuted,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                                Switch(
-                                    checked = autoRefine,
-                                    onCheckedChange = {
-                                        autoRefine = it
-                                        preferences.liveAutoRefine = it
-                                        liveController.autoRefine = it
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = KothonIndigo
-                                    ),
-                                    modifier = Modifier.testTag("studio_auto_refine_switch")
-                                )
-                            }
-
-                            OutlinedButton(
-                                onClick = { checkStudioModelSupport() },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .padding(top = 8.dp)
-                                    .testTag("studio_check_model_button")
-                            ) {
-                                Text("Check on-device model", fontSize = 11.sp)
-                            }
-
-                            if (modelStatus != null) {
-                                Text(
-                                    text = modelStatus ?: "",
-                                    color = KothonTextSecondary,
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(top = 6.dp)
-                                )
-                            }
-                        }
                     }
-                }
-            }
 
-            // In-App Dictation & AI Studio
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("voice_dictation_studio_card"),
-                    colors = CardDefaults.cardColors(containerColor = KothonDarkSurface),
-                    shape = RoundedCornerShape(16.dp),
-                    border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(KothonBorder))
-                ) {
+                    if (!liveEnabled) {
+                        Text(
+                            text = "Live mode is off — enable it in Settings",
+                            color = KothonAmber,
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Microphone action
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = "Live Speech Dictation & Translation Studio",
-                            color = KothonTextPrimary,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Speak naturally in ${currentSourceLang.name} — AI refines and translates instantaneously.",
-                            color = KothonTextSecondary,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp)
-                        )
-
-                        // Waveform Animation while recording
-                        if (isRecording) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth(0.7f)
-                                    .height(36.dp)
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                for (i in 0 until 11) {
-                                    val factor = (Math.sin((i.toDouble() / 11) * Math.PI) * 0.85 + 0.15).toFloat()
-                                    val barHeight = (6 + (amplitude * 28 * factor)).coerceIn(4f, 32f).dp
-                                    Box(
-                                        modifier = Modifier
-                                            .width(4.dp)
-                                            .height(barHeight)
-                                            .clip(RoundedCornerShape(2.dp))
-                                            .background(KothonCyan)
-                                    )
-                                }
-                            }
-                        }
-
-                        // Big Mic Action Button
                         Box(
                             contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(96.dp)
-                                .padding(vertical = 8.dp)
+                            modifier = Modifier.size(84.dp)
                         ) {
                             if (isRecording) {
                                 Box(
                                     modifier = Modifier
-                                        .size(88.dp)
+                                        .size(76.dp)
                                         .scale(pulseScale)
                                         .clip(CircleShape)
-                                        .background(KothonRose.copy(alpha = 0.25f))
+                                        .background(KothonRose.copy(alpha = 0.22f))
                                 )
                             }
-
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                    .size(76.dp)
+                                    .size(66.dp)
                                     .clip(CircleShape)
-                                    .background(if (isRecording) KothonRose else KothonCyan)
-                                    .clickable {
+                                    .background(
+                                        when {
+                                            isRecording -> KothonRose
+                                            isProcessing -> KothonIndigo
+                                            else -> KothonCyan
+                                        }
+                                    )
+                                    .clickable(
+                                        role = Role.Button,
+                                        onClickLabel = if (isRecording) "Stop dictation" else "Start dictation"
+                                    ) {
                                         if (isRecording) {
                                             stopDictation()
                                         } else {
@@ -1414,261 +801,151 @@ fun KothonAppScreen() {
                                 if (isProcessing) {
                                     CircularProgressIndicator(
                                         color = Color.White,
-                                        strokeWidth = 3.dp,
-                                        modifier = Modifier.size(34.dp)
+                                        strokeWidth = 2.5.dp,
+                                        modifier = Modifier.size(26.dp)
                                     )
                                 } else {
                                     Icon(
                                         imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
-                                        contentDescription = if (isRecording) "Stop" else "Record",
+                                        contentDescription = if (isRecording) "Stop dictation" else "Start dictation",
                                         tint = if (isRecording) Color.White else Color(0xFF0F172A),
-                                        modifier = Modifier.size(38.dp)
+                                        modifier = Modifier.size(30.dp)
                                     )
                                 }
                             }
                         }
 
                         Text(
-                            text = if (isRecording) "Listening... Tap to finish & refine"
-                            else if (isProcessing) "Refining & translating with $selectedProvider..."
-                            else "Tap mic to start speaking (Tap again to stop)",
-                            color = if (isRecording) KothonRose else if (isProcessing) KothonIndigo else KothonTextSecondary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
+                            text = when {
+                                isRecording -> "Listening — tap to stop & refine"
+                                isProcessing -> "Refining with $selectedProvider…"
+                                liveModeActive -> "Tap to start live dictation"
+                                else -> "Tap to record, then refine with AI"
+                            },
+                            color = when {
+                                isRecording -> KothonRose
+                                isProcessing -> KothonIndigo
+                                else -> KothonTextSecondary
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .semantics { liveRegion = LiveRegionMode.Polite }
                         )
+                    }
 
-                        // Real-time live dictation streaming display
-                        if ((isRecording || isProcessing) && livePreviewText.isNotBlank()) {
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 10.dp)
-                                    .testTag("live_speech_stream_card"),
-                                colors = CardDefaults.cardColors(containerColor = KothonDarkCard),
-                                shape = RoundedCornerShape(10.dp),
-                                border = CardDefaults.outlinedCardBorder().copy(
-                                    brush = androidx.compose.ui.graphics.SolidColor(KothonCyan.copy(alpha = 0.6f))
+                    // Live / preview transcript
+                    if ((isRecording || isProcessing) && livePreviewText.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(KothonDarkCard)
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                .testTag("live_speech_stream_card")
+                        ) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 4.dp)
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(if (liveModeActive) KothonCyan else KothonRose)
                                 )
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(if (liveModeActive) KothonCyan else KothonRose)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
                                     Text(
-                                        text = if (liveModeActive) "LIVE: " else "PREVIEW: ",
+                                        text = if (liveModeActive) "LIVE TRANSCRIPT" else "PREVIEW",
                                         color = KothonCyan,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.6.sp
                                     )
                                     Text(
                                         text = livePreviewText,
                                         color = KothonTextPrimary,
-                                        fontSize = 13.sp,
-                                        lineHeight = 18.sp
+                                        fontSize = 12.sp,
+                                        lineHeight = 17.sp,
+                                        maxLines = 5,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(top = 2.dp)
                                     )
                                 }
                             }
                         }
+                    }
 
-                        // Manual undo / refine after a live session
-                        if (liveModeActive && (liveUi.canUndo || liveUi.canRefine)) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 10.dp),
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                if (liveUi.canUndo) {
-                                    OutlinedButton(
-                                        onClick = { undoStudioLive() },
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.testTag("studio_undo_button")
-                                    ) {
-                                        Text("Undo AI refinement", fontSize = 11.sp)
-                                    }
+                    // Manual undo / refine after a live session
+                    if (liveModeActive && (liveUi.canUndo || liveUi.canRefine)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (liveUi.canUndo) {
+                                TextButton(
+                                    onClick = { undoStudioLive() },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("studio_undo_button")
+                                ) {
+                                    Text("Undo AI", fontSize = 11.sp)
                                 }
-                                if (liveUi.canUndo && liveUi.canRefine) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                }
-                                if (liveUi.canRefine) {
-                                    Button(
-                                        onClick = { refineStudioLive() },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = KothonAmber,
-                                            contentColor = Color(0xFF0F172A)
-                                        ),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.testTag("studio_refine_button")
-                                    ) {
-                                        Text("Refine with AI", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
+                            }
+                            if (liveUi.canRefine) {
+                                Button(
+                                    onClick = { refineStudioLive() },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = KothonAmber,
+                                        contentColor = Color(0xFF0F172A)
+                                    ),
+                                    shape = RoundedCornerShape(9.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("studio_refine_button")
+                                ) {
+                                    Text("Refine with AI", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
+                    }
 
-                        // Error Banner with Fallback Action
-                        if (studioError != null) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 10.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
+                    // Error banner
+                    if (studioError != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(KothonRose.copy(alpha = 0.10f))
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Column {
                                 Text(
                                     text = studioError ?: "",
                                     color = KothonRose,
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.Center
+                                    fontSize = 11.sp,
+                                    lineHeight = 16.sp
                                 )
-
                                 if (selectedProvider != KothonPreferences.PROVIDER_GEMINI) {
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Button(
+                                    TextButton(
                                         onClick = {
                                             selectedProvider = KothonPreferences.PROVIDER_GEMINI
                                             preferences.provider = KothonPreferences.PROVIDER_GEMINI
                                             studioError = null
                                             Toast.makeText(context, "Switched to Gemini (Built-in)", Toast.LENGTH_SHORT).show()
                                         },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = KothonIndigo,
-                                            contentColor = Color.White
-                                        ),
-                                        shape = RoundedCornerShape(8.dp)
+                                        contentPadding = PaddingValues(0.dp),
+                                        modifier = Modifier.height(30.dp)
                                     ) {
-                                        Text("Switch to Gemini (Built-in) & Try Again", fontSize = 11.sp)
-                                    }
-                                }
-                            }
-                        }
-
-                        // Refined Result Card with Language Detection Badge
-                        if (lastResult != null) {
-                            val res = lastResult!!
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 16.dp)
-                                    .testTag("studio_result_card"),
-                                colors = CardDefaults.cardColors(containerColor = KothonDarkCard),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(Color(0xFF065F46))
-                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                                            ) {
-                                                Text(
-                                                    text = "Detected: ${res.detectedLanguage}",
-                                                    color = Color(0xFFA7F3D0),
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "→ ${res.targetLanguage}",
-                                                color = KothonCyan,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                        }
-
-                                        Row {
-                                            IconButton(
-                                                onClick = {
-                                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                    clipboard.setPrimaryClip(ClipData.newPlainText("Kothon Refined", res.refinedText))
-                                                    Toast.makeText(context, "Copied to clipboard!", Toast.LENGTH_SHORT).show()
-                                                },
-                                                modifier = Modifier.size(32.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.ContentCopy,
-                                                    contentDescription = "Copy",
-                                                    tint = KothonCyan,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-
-                                            IconButton(
-                                                onClick = {
-                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                        type = "text/plain"
-                                                        putExtra(Intent.EXTRA_TEXT, res.refinedText)
-                                                    }
-                                                    context.startActivity(Intent.createChooser(shareIntent, "Share refined text"))
-                                                },
-                                                modifier = Modifier.size(32.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Share,
-                                                    contentDescription = "Share",
-                                                    tint = KothonTextSecondary,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    // Refined Output
-                                    Text(
-                                        text = res.refinedText,
-                                        color = KothonTextPrimary,
-                                        fontSize = 15.sp,
-                                        lineHeight = 22.sp,
-                                        fontWeight = FontWeight.Normal,
-                                        modifier = Modifier.padding(top = 8.dp)
-                                    )
-
-                                    // Optional verbatim raw transcript toggle
-                                    if (res.rawTranscript.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        Row(
-                                            modifier = Modifier
-                                                .clickable { showRawComparison = !showRawComparison }
-                                                .padding(vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = if (showRawComparison) "Hide original raw speech" else "View original raw speech",
-                                                color = KothonAmber,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
-
-                                        if (showRawComparison) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color(0xFF0F172A))
-                                                    .padding(10.dp)
-                                            ) {
-                                                Text(
-                                                    text = "\"${res.rawTranscript}\"",
-                                                    color = KothonTextMuted,
-                                                    fontSize = 12.sp,
-                                                    lineHeight = 17.sp
-                                                )
-                                            }
-                                        }
+                                        Text("Switch to Gemini (Built-in)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
@@ -1677,103 +954,308 @@ fun KothonAppScreen() {
                 }
             }
 
-            // Keyboard Setup & Playground Card
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("keyboard_setup_card"),
-                    colors = CardDefaults.cardColors(containerColor = KothonDarkSurface),
-                    shape = RoundedCornerShape(16.dp),
-                    border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(KothonBorder))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+            // ---------------------------------------------------------------
+            // 2. Latest refined result
+            // ---------------------------------------------------------------
+            if (lastResult != null) {
+                item {
+                    val res = lastResult!!
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("studio_result_card"),
+                        colors = CardDefaults.cardColors(containerColor = KothonDarkCard),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, KothonCyan.copy(alpha = 0.35f))
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(KothonCyan.copy(alpha = 0.14f))
+                                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = res.detectedLanguage,
+                                            color = KothonCyan,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Text(
+                                        text = "  →  ${res.targetLanguage}",
+                                        color = KothonTextSecondary,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("Kothon Refined", res.refinedText))
+                                            Toast.makeText(context, "Copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                        },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Copy refined text",
+                                            tint = KothonCyan,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(Intent.EXTRA_TEXT, res.refinedText)
+                                            }
+                                            context.startActivity(Intent.createChooser(shareIntent, "Share refined text"))
+                                        },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Share,
+                                            contentDescription = "Share refined text",
+                                            tint = KothonTextSecondary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+
                             Text(
-                                text = "System Keyboard & Test Playground",
+                                text = res.refinedText,
                                 color = KothonTextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 14.sp,
+                                lineHeight = 21.sp,
+                                modifier = Modifier.padding(top = 8.dp)
                             )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
+
+                            if (res.rawTranscript.isNotBlank()) {
+                                Row(
                                     modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isKeyboardSelected) KothonEmerald else KothonAmber)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (isKeyboardSelected) "Active" else if (isKeyboardEnabled) "Enabled" else "Not Enabled",
-                                    color = if (isKeyboardSelected) KothonEmerald else KothonAmber,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                        .padding(top = 6.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { showRawComparison = !showRawComparison }
+                                        .padding(vertical = 4.dp, horizontal = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = if (showRawComparison) "Hide original speech" else "Show original speech",
+                                        color = KothonAmber,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+
+                                if (showRawComparison) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(KothonDarkBg)
+                                            .padding(10.dp)
+                                    ) {
+                                        Text(
+                                            text = "\"${res.rawTranscript}\"",
+                                            color = KothonTextSecondary,
+                                            fontSize = 11.sp,
+                                            lineHeight = 16.sp
+                                        )
+                                    }
+                                }
                             }
                         }
+                    }
+                }
+            }
 
+            // ---------------------------------------------------------------
+            // 3. Languages
+            // ---------------------------------------------------------------
+            item {
+                KothonCard(modifier = Modifier.testTag("language_selection_card")) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Test Kothon keyboard directly in the playground field below, or switch system keyboards.",
+                            text = "Language",
                             color = KothonTextSecondary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.6.sp
+                        )
+                        Icon(
+                            imageVector = Icons.Default.Translate,
+                            contentDescription = null,
+                            tint = KothonTextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        KothonLanguagePill(
+                            label = "SPEAK",
+                            flag = currentSourceLang.flagEmoji,
+                            name = currentSourceLang.name,
+                            accent = false,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("source_language_selector_button"),
+                            onClick = { showLanguageSheetForSource = true }
                         )
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        IconButton(
+                            onClick = {
+                                if (sourceLangCode != "auto") {
+                                    val temp = sourceLangCode
+                                    sourceLangCode = if (targetLangCode == "original") "en" else targetLangCode
+                                    targetLangCode = temp
+                                    preferences.sourceLanguage = sourceLangCode
+                                    preferences.targetLanguage = targetLangCode
+                                    Toast.makeText(context, "Languages swapped", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Cannot swap when Source is Auto Detect", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier
+                                .padding(horizontal = 4.dp)
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(KothonDarkBg)
+                                .testTag("swap_languages_button")
                         ) {
-                            Button(
-                                onClick = {
-                                    context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isKeyboardEnabled) KothonDarkCard else KothonCyan,
-                                    contentColor = if (isKeyboardEnabled) KothonTextPrimary else Color(0xFF0F172A)
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = if (isKeyboardEnabled) "1. Enabled ✓" else "1. Enable Keyboard",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-
-                            Button(
-                                onClick = {
-                                    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                                    imm?.showInputMethodPicker()
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isKeyboardSelected) KothonEmerald else KothonIndigo,
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = if (isKeyboardSelected) "2. Selected ✓" else "2. Select Kothon",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.SwapHoriz,
+                                contentDescription = "Swap languages",
+                                tint = KothonCyan,
+                                modifier = Modifier.size(17.dp)
+                            )
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        KothonLanguagePill(
+                            label = "OUTPUT",
+                            flag = currentTargetLang.flagEmoji,
+                            name = currentTargetLang.name,
+                            accent = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("target_language_selector_button"),
+                            onClick = { showLanguageSheetForTarget = true }
+                        )
+                    }
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // 4. AI provider
+            // ---------------------------------------------------------------
+            item {
+                KothonCard(modifier = Modifier.testTag("ai_provider_card")) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "AI provider",
+                            color = KothonTextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.6.sp
+                        )
+                        KothonStatusPill(
+                            text = when {
+                                selectedProvider == KothonPreferences.PROVIDER_GEMINI -> "Built-in"
+                                apiKeyText.isNotBlank() -> "Key saved"
+                                else -> "Key required"
+                            },
+                            color = if (selectedProvider == KothonPreferences.PROVIDER_GEMINI || apiKeyText.isNotBlank()) KothonEmerald else KothonAmber
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectableGroup()
+                    ) {
+                        items(KothonPreferences.PROVIDERS) { provider ->
+                            KothonChip(
+                                label = if (provider == KothonPreferences.PROVIDER_GEMINI) "Gemini" else provider,
+                                selected = selectedProvider == provider,
+                                onClick = {
+                                    selectedProvider = provider
+                                    preferences.provider = provider
+                                    apiKeyText = preferences.getApiKeyForProvider(provider)
+                                    keyTestResult = null
+                                }
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = when (selectedProvider) {
+                            KothonPreferences.PROVIDER_GEMINI -> "Gemini 3.8 Flash · built-in key ready"
+                            KothonPreferences.PROVIDER_GROQ -> "Whisper large-v3 + Llama 3.3 70B · fastest"
+                            KothonPreferences.PROVIDER_OPENAI -> "Whisper-1 + GPT-4o-mini · high accuracy"
+                            KothonPreferences.PROVIDER_NVIDIA -> "Nemotron 30B transcribe · high fidelity"
+                            else -> ""
+                        },
+                        color = KothonTextSecondary,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+
+                    if (selectedProvider != KothonPreferences.PROVIDER_GEMINI || showApiKeyInput) {
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         OutlinedTextField(
-                            value = testInputText,
-                            onValueChange = { testInputText = it },
-                            placeholder = { Text("Tap here to open Kothon keyboard & dictate...", color = KothonTextMuted) },
+                            value = apiKeyText,
+                            onValueChange = {
+                                apiKeyText = it
+                                preferences.setApiKeyForProvider(selectedProvider, it.trim())
+                                keyTestResult = null
+                            },
+                            placeholder = {
+                                Text(
+                                    text = when (selectedProvider) {
+                                        KothonPreferences.PROVIDER_GROQ -> "Groq key (gsk_…)"
+                                        KothonPreferences.PROVIDER_OPENAI -> "OpenAI key (sk-…)"
+                                        KothonPreferences.PROVIDER_NVIDIA -> "NVIDIA key (nvapi-…)"
+                                        else -> "Custom Gemini key"
+                                    },
+                                    color = KothonTextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("playground_text_field"),
+                                .testTag("provider_api_key_input"),
                             shape = RoundedCornerShape(10.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = KothonCyan,
@@ -1782,89 +1264,486 @@ fun KothonAppScreen() {
                                 unfocusedTextColor = KothonTextPrimary,
                                 focusedContainerColor = KothonDarkCard,
                                 unfocusedContainerColor = KothonDarkCard
+                            )
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        isTestingKey = true
+                                        val res = withContext(Dispatchers.IO) {
+                                            transcriptionClient.testProviderConnection(selectedProvider, apiKeyText.trim())
+                                        }
+                                        keyTestResult = res
+                                        isTestingKey = false
+                                    }
+                                },
+                                enabled = !isTestingKey && apiKeyText.isNotBlank(),
+                                shape = RoundedCornerShape(9.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                            ) {
+                                if (isTestingKey) {
+                                    CircularProgressIndicator(
+                                        color = KothonIndigo,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                } else {
+                                    Text("Test key", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    preferences.setApiKeyForProvider(selectedProvider, apiKeyText.trim())
+                                    Toast.makeText(context, "$selectedProvider key saved!", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = KothonCyan,
+                                    contentColor = Color(0xFF0F172A)
+                                ),
+                                shape = RoundedCornerShape(9.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                            ) {
+                                Text("Save key", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        if (keyTestResult != null) {
+                            val (ok, msg) = keyTestResult!!
+                            Text(
+                                text = msg,
+                                color = if (ok) KothonEmerald else KothonRose,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .padding(top = 6.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showApiKeyInput = true }
+                                .padding(vertical = 4.dp, horizontal = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = null,
+                                tint = KothonTextSecondary,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Use a custom Gemini key",
+                                color = KothonTextSecondary,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // 5. Refinement (collapsible)
+            // ---------------------------------------------------------------
+            item {
+                KothonCard(modifier = Modifier.testTag("advanced_refinement_card")) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(
+                                role = Role.Button,
+                                onClickLabel = if (refinementExpanded) "Collapse refinement options" else "Expand refinement options"
+                            ) { refinementExpanded = !refinementExpanded }
+                            .padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = KothonAmber,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Refinement",
+                                    color = KothonTextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = buildString {
+                                        append(currentTone)
+                                        append(" · Fillers ")
+                                        append(if (removeFillers) "on" else "off")
+                                        append(" · Grammar ")
+                                        append(if (fixGrammar) "on" else "off")
+                                    },
+                                    color = KothonTextSecondary,
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = if (refinementExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = KothonTextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    AnimatedVisibility(visible = refinementExpanded) {
+                        Column(modifier = Modifier.padding(top = 12.dp)) {
+                            Text(
+                                text = "TONE",
+                                color = KothonTextSecondary,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.selectableGroup(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val popularTones = listOf(
+                                    KothonPreferences.TONE_PROFESSIONAL,
+                                    KothonPreferences.TONE_EXECUTIVE,
+                                    KothonPreferences.TONE_CONCISE
+                                )
+                                popularTones.forEach { toneName ->
+                                    KothonChip(
+                                        label = toneName.substringBefore(" "),
+                                        selected = currentTone == toneName,
+                                        selectedColor = KothonIndigo,
+                                        onClick = {
+                                            currentTone = toneName
+                                            preferences.tone = toneName
+                                        }
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            KothonSettingSwitchRow(
+                                title = "Remove vocal fillers",
+                                subtitle = "Drops “um”, “uh”, “mane” and stutters",
+                                checked = removeFillers,
+                                onCheckedChange = {
+                                    removeFillers = it
+                                    preferences.removeFillers = it
+                                }
+                            )
+                            KothonSettingSwitchRow(
+                                title = "Polish grammar & punctuation",
+                                subtitle = "Fixes structure, casing and agreement",
+                                checked = fixGrammar,
+                                onCheckedChange = {
+                                    fixGrammar = it
+                                    preferences.fixGrammar = it
+                                }
+                            )
+
+                            if (liveModeActive) {
+                                HorizontalDivider(
+                                    color = KothonBorder.copy(alpha = 0.6f),
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                )
+                                KothonSettingSwitchRow(
+                                    title = "Auto-refine live speech",
+                                    subtitle = "Off keeps the raw transcript",
+                                    checked = autoRefine,
+                                    tint = KothonIndigo,
+                                    modifier = Modifier.testTag("studio_auto_refine_switch"),
+                                    onCheckedChange = {
+                                        autoRefine = it
+                                        preferences.liveAutoRefine = it
+                                        liveController.autoRefine = it
+                                    }
+                                )
+                                TextButton(
+                                    onClick = { checkStudioModelSupport() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("studio_check_model_button")
+                                ) {
+                                    Text("Check on-device model", fontSize = 11.sp)
+                                }
+                                if (modelStatus != null) {
+                                    Text(
+                                        text = modelStatus ?: "",
+                                        color = KothonTextSecondary,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // 6. Keyboard setup & playground
+            // ---------------------------------------------------------------
+            item {
+                KothonCard(modifier = Modifier.testTag("keyboard_setup_card")) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Keyboard,
+                                contentDescription = null,
+                                tint = KothonTextSecondary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "System keyboard",
+                                color = KothonTextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        KothonStatusPill(
+                            text = when {
+                                isKeyboardSelected -> "Active"
+                                isKeyboardEnabled -> "Enabled"
+                                else -> "Off"
+                            },
+                            color = when {
+                                isKeyboardSelected -> KothonEmerald
+                                isKeyboardEnabled -> KothonCyan
+                                else -> KothonAmber
+                            }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isKeyboardEnabled) KothonDarkCard else KothonCyan,
+                                contentColor = if (isKeyboardEnabled) KothonTextPrimary else Color(0xFF0F172A)
                             ),
-                            maxLines = 4
+                            shape = RoundedCornerShape(9.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(34.dp)
+                        ) {
+                            Text(
+                                text = if (isKeyboardEnabled) "1 · Enabled" else "1 · Enable",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                                imm?.showInputMethodPicker()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isKeyboardSelected) KothonDarkCard else KothonIndigo,
+                                contentColor = if (isKeyboardSelected) KothonEmerald else Color.White
+                            ),
+                            shape = RoundedCornerShape(9.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(34.dp)
+                        ) {
+                            Text(
+                                text = if (isKeyboardSelected) "2 · Selected" else "2 · Select",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = testInputText,
+                        onValueChange = { testInputText = it },
+                        placeholder = {
+                            Text(
+                                text = "Try the keyboard here…",
+                                color = KothonTextSecondary,
+                                fontSize = 12.sp
+                            )
+                        },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .testTag("playground_text_field"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = KothonCyan,
+                            unfocusedBorderColor = KothonBorder,
+                            focusedTextColor = KothonTextPrimary,
+                            unfocusedTextColor = KothonTextPrimary,
+                            focusedContainerColor = KothonDarkCard,
+                            unfocusedContainerColor = KothonDarkCard
+                        ),
+                        minLines = 1,
+                        maxLines = 3
+                    )
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // 7. History
+            // ---------------------------------------------------------------
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 2.dp, end = 2.dp, top = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "History",
+                        color = KothonTextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${recentNotes.size} item${if (recentNotes.size == 1) "" else "s"}",
+                        color = KothonTextSecondary,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            if (recentNotes.isEmpty()) {
+                item {
+                    KothonCard {
+                        Text(
+                            text = "Your refined dictations will appear here.",
+                            color = KothonTextSecondary,
+                            fontSize = 12.sp
                         )
                     }
                 }
             }
 
-            // Recent Refined Transcriptions History
-            item {
-                Text(
-                    text = "Refinement History & Logs",
-                    color = KothonTextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-
-            items(recentNotes) { note ->
+            items(recentNotes, key = { it.id }) { note ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = KothonDarkSurface),
-                    shape = RoundedCornerShape(12.dp),
-                    border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(KothonBorder))
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, KothonBorder.copy(alpha = 0.5f))
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(KothonDarkCard)
+                                        .clip(RoundedCornerShape(5.dp))
+                                        .background(KothonCyan.copy(alpha = 0.12f))
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
                                     Text(
                                         text = "${note.detectedLanguage} → ${note.targetLanguage}",
                                         color = KothonCyan,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = note.tone,
                                     color = KothonAmber,
-                                    fontSize = 11.sp
+                                    fontSize = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = note.timestamp,
-                                color = KothonTextMuted,
-                                fontSize = 11.sp
+                                color = KothonTextSecondary,
+                                fontSize = 9.sp
                             )
                         }
 
                         Text(
                             text = note.refinedText,
                             color = KothonTextPrimary,
-                            fontSize = 14.sp,
-                            lineHeight = 20.sp,
-                            modifier = Modifier.padding(vertical = 8.dp)
+                            fontSize = 13.sp,
+                            lineHeight = 19.sp,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 6.dp)
                         )
 
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
+                            modifier = Modifier
+                                .align(Alignment.End)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("Kothon Note", note.refinedText))
+                                    Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = null,
+                                tint = KothonCyan,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Copy text",
+                                text = "Copy",
                                 color = KothonCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .clickable {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("Kothon Note", note.refinedText))
-                                        Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT).show()
-                                    }
-                                    .padding(4.dp)
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -1872,10 +1751,19 @@ fun KothonAppScreen() {
             }
 
             item {
-                Spacer(modifier = Modifier.height(32.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, bottom = 2.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    BrandFooter()
+                }
             }
         }
     }
+    }
+
 
     // Microphone Permission Dialog
     if (showPermissionDialog) {

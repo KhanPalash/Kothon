@@ -4,6 +4,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.advanceTimeBy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -60,6 +61,7 @@ class LiveDictationControllerTest {
     fun `partial text updates composing`() = runTest {
         controller.start(testConfig)
         fake.simulatePartial("hello")
+        advanceTimeBy(50)
         assertEquals("hello", editor.composingText)
     }
 
@@ -95,6 +97,7 @@ class LiveDictationControllerTest {
         fake.simulateFinal("hello")
         // Partial shows cumulative "hello world" → strip "hello " → show "world"
         fake.simulatePartial("hello world")
+        advanceTimeBy(50)
         assertEquals("world", editor.composingText)
     }
 

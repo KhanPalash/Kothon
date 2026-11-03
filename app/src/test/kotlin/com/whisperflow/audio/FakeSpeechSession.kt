@@ -18,6 +18,8 @@ class FakeSpeechSession : SpeechSession {
         started = true
         stopped = false
         destroyed = false
+        // Simulate ready state immediately for tests
+        this.listener?.onReady()
     }
 
     override fun stop() {

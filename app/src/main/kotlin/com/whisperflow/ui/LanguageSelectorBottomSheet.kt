@@ -1,5 +1,6 @@
 package com.whisperflow.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -39,11 +40,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
+import com.example.ui.theme.KothonAmber
+import com.example.ui.theme.KothonBorder
+import com.example.ui.theme.KothonCyan
+import com.example.ui.theme.KothonDarkBg
+import com.example.ui.theme.KothonDarkCard
+import com.example.ui.theme.KothonDarkSurface
+import com.example.ui.theme.KothonTextMuted
+import com.example.ui.theme.KothonTextPrimary
+import com.example.ui.theme.KothonTextSecondary
 import com.whisperflow.model.Language
 import com.whisperflow.model.LanguageCatalog
 
@@ -56,225 +68,255 @@ fun LanguageSelectorBottomSheet(
     recentLanguageCodes: List<String>,
     onLanguageSelected: (Language) -> Unit,
     onDismissRequest: () -> Unit,
+    excludeCodes: Set<String> = emptySet(),
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    val filteredLanguages = remember(searchQuery, isTargetLanguage) {
+    val filteredLanguages = remember(searchQuery, isTargetLanguage, excludeCodes) {
         LanguageCatalog.search(searchQuery, forTarget = isTargetLanguage)
+            .filter { it.code.lowercase() !in excludeCodes }
     }
 
-    val recentLanguages = remember(recentLanguageCodes, isTargetLanguage) {
-        recentLanguageCodes.map { LanguageCatalog.findByCode(it) }
-            .filter { lang ->
-                if (isTargetLanguage) lang.code != "auto" else true
-            }
+    val recentLanguages = remember(recentLanguageCodes, isTargetLanguage, excludeCodes) {
+        recentLanguageCodes
+            .filter { it.lowercase() !in excludeCodes }
+            .map { LanguageCatalog.findByCode(it) }
+            .filter { lang -> if (isTargetLanguage) lang.code != "auto" else true }
+            .distinctBy { it.code }
     }
 
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        containerColor = Color(0xFF0F172A),
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = KothonDarkSurface,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
         dragHandle = {
             Box(
                 modifier = Modifier
-                    .padding(top = 12.dp, bottom = 8.dp)
-                    .width(44.dp)
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .width(40.dp)
                     .height(4.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF334155))
+                    .background(KothonBorder)
             )
         }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .testTag("language_selector_sheet")
-        ) {
-            // Header with title and close button
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = title,
-                    color = Color(0xFFF8FAFC),
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                IconButton(
-                    onClick = onDismissRequest,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = Color(0xFF94A3B8)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Search Bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search language or country...", color = Color(0xFF64748B), fontSize = 14.sp) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = Color(0xFF38BDF8)
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear search",
-                                tint = Color(0xFF94A3B8),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                },
+        Box(modifier = Modifier.fillMaxWidth()) {
+            // Brand watermark behind the sheet content
+            Image(
+                painter = painterResource(R.drawable.brand_logo),
+                contentDescription = null,
+                alpha = 0.30f,
+                contentScale = ContentScale.Fit,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("language_search_input"),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color(0xFF38BDF8),
-                    unfocusedBorderColor = Color(0xFF334155),
-                    focusedTextColor = Color(0xFFF8FAFC),
-                    unfocusedTextColor = Color(0xFFF8FAFC),
-                    focusedContainerColor = Color(0xFF1E293B),
-                    unfocusedContainerColor = Color(0xFF1E293B)
-                ),
-                singleLine = true
+                    .matchParentSize()
+                    .padding(horizontal = 60.dp, vertical = 24.dp)
             )
 
-            // Recently Used Languages Row (only if not searching)
-            if (searchQuery.isEmpty() && recentLanguages.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(16.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .testTag("language_selector_sheet")
+            ) {
+                // Header
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = "Recent",
-                        tint = Color(0xFFFBBF24),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Recently Used",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = title,
+                        color = KothonTextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
                     )
+                    IconButton(
+                        onClick = onDismissRequest,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = KothonTextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Search
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = {
+                        Text(
+                            text = "Search language or country…",
+                            color = KothonTextMuted,
+                            fontSize = 11.sp
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = KothonCyan,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear search",
+                                    tint = KothonTextSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("language_search_input"),
+                    shape = RoundedCornerShape(10.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 12.sp,
+                        color = KothonTextPrimary
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = KothonCyan,
+                        unfocusedBorderColor = KothonBorder.copy(alpha = 0.7f),
+                        focusedContainerColor = KothonDarkBg,
+                        unfocusedContainerColor = KothonDarkBg,
+                        cursorColor = KothonCyan
+                    ),
+                    singleLine = true
+                )
+
+                // Recently used
+                if (searchQuery.isEmpty() && recentLanguages.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = "Recent",
+                            tint = KothonAmber,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "RECENTLY USED",
+                            color = KothonTextSecondary,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.6.sp
+                        )
+                    }
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(recentLanguages, key = { it.code }) { lang ->
+                            val isSelected = lang.code.equals(currentSelectedCode, ignoreCase = true)
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(if (isSelected) KothonCyan else KothonDarkCard)
+                                    .clickable { onLanguageSelected(lang) }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .testTag("recent_lang_${lang.code}"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = lang.flagEmoji, fontSize = 12.sp)
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = lang.name,
+                                    color = if (isSelected) KothonDarkBg else KothonTextSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "ALL LANGUAGES (${filteredLanguages.size})",
+                    color = KothonTextSecondary,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.6.sp,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+
+                // Language list
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(326.dp)
+                        .padding(bottom = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    items(recentLanguages) { lang ->
+                    items(filteredLanguages, key = { it.code }) { lang ->
                         val isSelected = lang.code.equals(currentSelectedCode, ignoreCase = true)
-                        Box(
+                        Row(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) Color(0xFF0369A1) else Color(0xFF1E293B))
-                                .clickable {
-                                    onLanguageSelected(lang)
-                                }
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                                .testTag("recent_lang_${lang.code}")
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(if (isSelected) KothonDarkCard else androidx.compose.ui.graphics.Color.Transparent)
+                                .clickable { onLanguageSelected(lang) }
+                                .padding(horizontal = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = lang.flagEmoji, fontSize = 14.sp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = lang.name,
-                                    color = if (isSelected) Color.White else Color(0xFFCBD5E1),
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .background(KothonDarkBg),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(text = lang.flagEmoji, fontSize = 15.sp)
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = lang.name,
+                                        color = if (isSelected) KothonCyan else KothonTextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = lang.nativeName,
+                                        color = KothonTextMuted,
+                                        fontSize = 10.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = KothonCyan,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "All Supported Languages (${filteredLanguages.size})",
-                color = Color(0xFF94A3B8),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
-            // Language List
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(340.dp)
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                items(filteredLanguages) { lang ->
-                    val isSelected = lang.code.equals(currentSelectedCode, ignoreCase = true)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isSelected) Color(0xFF1E293B) else Color.Transparent)
-                            .clickable {
-                                onLanguageSelected(lang)
-                            }
-                            .padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF334155)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(text = lang.flagEmoji, fontSize = 18.sp)
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = lang.name,
-                                    color = if (isSelected) Color(0xFF38BDF8) else Color(0xFFF8FAFC),
-                                    fontSize = 14.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                                Text(
-                                    text = lang.nativeName,
-                                    color = Color(0xFF64748B),
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Selected",
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(20.dp)
-                            )
                         }
                     }
                 }

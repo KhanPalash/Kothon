@@ -33,6 +33,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.KothonBorder
+import com.example.ui.theme.KothonCyan
+import com.example.ui.theme.KothonDarkCard
+import com.example.ui.theme.KothonTextMuted
+import com.example.ui.theme.KothonTextPrimary
+import com.example.ui.theme.KothonTextSecondary
 
 @Composable
 fun StandardKeyboardView(
@@ -55,53 +61,54 @@ fun StandardKeyboardView(
     val row3 = if (isSymbols) listOf("*", "\"", "'", ":", ";", "!", "?")
     else listOf("z", "x", "c", "v", "b", "n", "m")
 
+    // Transparent surface so the IME background watermark stays visible.
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .testTag("standard_keyboard_view"),
-        color = Color(0xFF0F172A),
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+        color = Color.Transparent
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             // Quick top bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = 8.dp, vertical = 1.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = "Kothon Keyboard",
-                    color = Color(0xFF64748B),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
+                    color = KothonTextSecondary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.3.sp
                 )
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF38BDF8).copy(alpha = 0.2f))
+                        .background(KothonCyan.copy(alpha = 0.14f))
                         .clickable { onSwitchToVoice() }
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
                         .testTag("switch_to_voice_button"),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Mic,
                         contentDescription = "Voice Mode",
-                        tint = Color(0xFF38BDF8),
-                        modifier = Modifier.height(14.dp)
+                        tint = KothonCyan,
+                        modifier = Modifier.height(12.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "Voice Refinement",
-                        color = Color(0xFF38BDF8),
-                        fontSize = 12.sp,
+                        color = KothonCyan,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -128,7 +135,7 @@ fun StandardKeyboardView(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 row2.forEach { char ->
@@ -149,7 +156,6 @@ fun StandardKeyboardView(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Shift key
                 KeySpecialButton(
                     text = if (isShifted) "▲" else "⇧",
                     modifier = Modifier.weight(1.4f),
@@ -168,14 +174,13 @@ fun StandardKeyboardView(
                     )
                 }
 
-                // Backspace
                 KeySpecialButton(
                     icon = {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Backspace,
                             contentDescription = "Backspace",
-                            tint = Color.White,
-                            modifier = Modifier.height(18.dp)
+                            tint = KothonTextPrimary,
+                            modifier = Modifier.height(16.dp)
                         )
                     },
                     modifier = Modifier.weight(1.4f),
@@ -189,56 +194,63 @@ fun StandardKeyboardView(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // ?123 toggle
                 KeySpecialButton(
                     text = if (isSymbols) "ABC" else "?123",
                     modifier = Modifier.weight(1.5f),
                     onClick = { isSymbols = !isSymbols }
                 )
 
-                // IME switch button
                 KeySpecialButton(
                     icon = {
                         Icon(
                             imageVector = Icons.Default.Language,
                             contentDescription = "Switch Input Method",
-                            tint = Color(0xFF94A3B8),
-                            modifier = Modifier.height(18.dp)
+                            tint = KothonTextSecondary,
+                            modifier = Modifier.height(16.dp)
                         )
                     },
                     modifier = Modifier.weight(1.2f),
                     onClick = onSwitchIme
                 )
 
-                // Space bar
                 Box(
                     modifier = Modifier
                         .weight(4.5f)
-                        .height(44.dp)
+                        .height(40.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF334155))
+                        .background(KothonDarkCard)
                         .clickable { onKeyChar(" ") }
                         .testTag("key_space"),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "space", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                    Text(
+                        text = "space",
+                        color = KothonTextMuted,
+                        fontSize = 11.sp
+                    )
                 }
 
-                // Enter key
                 KeySpecialButton(
                     icon = {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.KeyboardReturn,
                             contentDescription = "Enter",
-                            tint = Color(0xFF0F172A),
-                            modifier = Modifier.height(20.dp)
+                            tint = Color(0xFF0B0F19),
+                            modifier = Modifier.height(18.dp)
                         )
                     },
-                    bgColor = Color(0xFF38BDF8),
+                    bgColor = KothonCyan,
                     modifier = Modifier.weight(1.8f),
                     onClick = onEnter
                 )
             }
+
+            BrandFooter(
+                fontSize = 9.sp,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 1.dp)
+            )
         }
     }
 }
@@ -251,17 +263,17 @@ private fun KeyButton(
 ) {
     Box(
         modifier = modifier
-            .height(44.dp)
+            .height(40.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(Color(0xFF1E293B))
+            .background(KothonDarkCard)
             .clickable(onClick = onClick)
             .testTag("key_$text"),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
-            color = Color.White,
-            fontSize = 17.sp,
+            color = KothonTextPrimary,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Normal
         )
     }
@@ -273,12 +285,12 @@ private fun KeySpecialButton(
     text: String? = null,
     icon: (@Composable () -> Unit)? = null,
     active: Boolean = false,
-    bgColor: Color = if (active) Color(0xFF475569) else Color(0xFF1E293B),
+    bgColor: Color = if (active) KothonBorder else KothonDarkCard,
     onClick: () -> Unit
 ) {
     Box(
         modifier = modifier
-            .height(44.dp)
+            .height(40.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(bgColor)
             .clickable(onClick = onClick),
@@ -287,8 +299,8 @@ private fun KeySpecialButton(
         if (text != null) {
             Text(
                 text = text,
-                color = Color.White,
-                fontSize = 13.sp,
+                color = KothonTextPrimary,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Medium
             )
         } else if (icon != null) {
