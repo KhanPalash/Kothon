@@ -8,7 +8,6 @@ import android.util.Log
 import com.example.BuildConfig
 import com.whisperflow.model.LanguageCatalog
 import com.whisperflow.settings.KothonPreferences
-import okhttp3.CertificatePinner
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -47,14 +46,6 @@ class TranscriptionClient(private val context: Context) {
         .connectTimeout(25, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
         .writeTimeout(45, TimeUnit.SECONDS)
-        .certificatePinner(
-            CertificatePinner.Builder()
-                .add("generativelanguage.googleapis.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-                .add("api.groq.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-                .add("api.openai.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-                .add("integrate.api.nvidia.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-                .build()
-        )
         .build()
 
     private fun validateProvider(provider: String): String =
@@ -68,11 +59,14 @@ class TranscriptionClient(private val context: Context) {
 
     // Gemini active models with fallback chain
     val geminiFallbackModels = listOf(
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
         "gemini-3.8-flash",
         "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-flash-latest",
-        "gemini-flash-lite-latest"
+        "gemini-3.5-flash-lite"
     )
 
     fun isOnline(): Boolean {

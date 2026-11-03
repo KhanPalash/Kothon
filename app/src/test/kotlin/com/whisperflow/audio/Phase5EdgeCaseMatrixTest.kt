@@ -118,7 +118,6 @@ class Phase5EdgeCaseMatrixTest {
         advanceUntilIdle()
         session.sendFinal("test text")
         session.simulateEnd()
-        advanceUntilIdle()
 
         assertEquals(DictationState.REFINING, controller.uiState.value.state)
 

@@ -4,17 +4,12 @@ import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import org.junit.Assert.*
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
 /**
  * Phase 0 Password Field Detection Tests
  *
  * Gate Criteria: Zero failures - all password types must be detected
  */
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
 class PasswordFieldDetectorTest {
 
     private fun createEditorInfo(inputType: Int): EditorInfo {
