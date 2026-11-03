@@ -8,6 +8,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -63,7 +65,6 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.theme.KothonAmber
 import com.example.ui.theme.KothonCyan
 import com.example.ui.theme.KothonDarkBg
-import com.example.ui.theme.KothonDarkCard
 import com.example.ui.theme.KothonEmerald
 import com.example.ui.theme.KothonIndigo
 import com.example.ui.theme.KothonRose
@@ -89,6 +90,7 @@ fun VoiceButton(
     targetLanguageCode: String = "en",
     tone: String = "Professional Clarity",
     modeLabel: String = "",
+    providerName: String = "Gemini",
     voiceDisabled: Boolean = false,
     canUndo: Boolean = false,
     canRefine: Boolean = false,
@@ -129,7 +131,6 @@ fun VoiceButton(
     val sourceLang = remember(sourceLanguageCode) { LanguageCatalog.findByCode(sourceLanguageCode) }
     val targetLang = remember(targetLanguageCode) { LanguageCatalog.findByCode(targetLanguageCode) }
 
-    // Transparent surface so the IME background watermark stays visible.
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -139,10 +140,29 @@ fun VoiceButton(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF0F172A).copy(alpha = 0.78f),
+                            Color(0xFF090D16).copy(alpha = 0.90f)
+                        )
+                    )
+                )
+                .border(
+                    width = 0.8.dp,
+                    brush = Brush.horizontalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.14f),
+                            KothonCyan.copy(alpha = 0.28f),
+                            Color.White.copy(alpha = 0.14f)
+                        )
+                    ),
+                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
+                )
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Quick top action bar: language pair, tone, keyboard switch, settings
+            // Frosted glass top action bar: language pair, tone, keyboard switch, home/settings
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -152,10 +172,11 @@ fun VoiceButton(
             ) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(KothonDarkCard)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(0.8.dp, KothonCyan.copy(alpha = 0.35f), RoundedCornerShape(11.dp))
                         .clickable { onToggleLanguages() }
-                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                         .testTag("translate_toggle_chip")
                         .semantics {
                             role = Role.Button
@@ -165,7 +186,7 @@ fun VoiceButton(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Translate,
-                        contentDescription = "",
+                        contentDescription = null,
                         tint = KothonCyan,
                         modifier = Modifier.size(13.dp)
                     )
@@ -180,10 +201,11 @@ fun VoiceButton(
 
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(KothonDarkCard)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(0.8.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(11.dp))
                         .clickable { onCycleTone() }
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .padding(horizontal = 9.dp, vertical = 6.dp)
                         .testTag("cycle_tone_chip")
                         .semantics {
                             role = Role.Button
@@ -193,7 +215,7 @@ fun VoiceButton(
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "",
+                        contentDescription = null,
                         tint = KothonAmber,
                         modifier = Modifier.size(12.dp)
                     )
@@ -211,7 +233,7 @@ fun VoiceButton(
                     IconButton(
                         onClick = onSwitchToKeyboard,
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(48.dp)
                             .testTag("switch_to_keyboard_button")
                             .semantics {
                                 role = Role.Button
@@ -220,27 +242,27 @@ fun VoiceButton(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Keyboard,
-                            contentDescription = "",
+                            contentDescription = null,
                             tint = KothonTextSecondary,
-                            modifier = Modifier.size(19.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
                     IconButton(
                         onClick = onOpenSettings,
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(48.dp)
                             .testTag("open_settings_button")
                             .semantics {
                                 role = Role.Button
-                                contentDescription = "Open Kothon settings"
+                                contentDescription = "Open Kothon Home & Settings"
                             }
                     ) {
                         Icon(
                             imageVector = Icons.Default.Settings,
-                            contentDescription = "",
+                            contentDescription = null,
                             tint = KothonTextSecondary,
-                            modifier = Modifier.size(19.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -251,11 +273,11 @@ fun VoiceButton(
                 text = when {
                     voiceDisabled -> "Voice disabled for password fields."
                     state == VoiceButtonState.IDLE -> {
-                        val modePrefix = if (modeLabel.isBlank()) "" else "$modeLabel • "
-                        "${modePrefix}Speak in ${sourceLang.name} → Output ${targetLang.name}"
+                        val modePrefix = if (modeLabel.isBlank()) "$providerName • " else "$providerName ($modeLabel) • "
+                        "${modePrefix}Speak ${sourceLang.name} → ${targetLang.name}"
                     }
-                    state == VoiceButtonState.RECORDING -> "Listening... Speak naturally"
-                    state == VoiceButtonState.PROCESSING -> "Detecting language, refining & translating..."
+                    state == VoiceButtonState.RECORDING -> statusMessage.ifEmpty { "Listening... Speak naturally" }
+                    state == VoiceButtonState.PROCESSING -> statusMessage.ifEmpty { "Refining with $providerName..." }
                     state == VoiceButtonState.SUCCESS -> statusMessage.ifEmpty { "Transcribed, refined and inserted!" }
                     state == VoiceButtonState.ERROR -> statusMessage.ifEmpty { "Failed. Tap to retry or use keyboard." }
                     else -> "Microphone permission needed. Tap to allow."
@@ -295,10 +317,11 @@ fun VoiceButton(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(KothonDarkCard)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .border(0.8.dp, KothonCyan.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                                 .clickable { onUndo() }
-                                .padding(horizontal = 11.dp, vertical = 8.dp)
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
                                 .testTag("live_undo_button")
                                 .semantics {
                                     role = Role.Button
@@ -314,10 +337,11 @@ fun VoiceButton(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(KothonDarkCard)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .border(0.8.dp, KothonAmber.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                                 .clickable { onRefine() }
-                                .padding(horizontal = 11.dp, vertical = 8.dp)
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
                                 .testTag("live_refine_button")
                                 .semantics {
                                     role = Role.Button
@@ -361,20 +385,20 @@ fun VoiceButton(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(70.dp)
+                    .size(72.dp)
                     .padding(3.dp)
             ) {
                 if (state == VoiceButtonState.RECORDING) {
                     Box(
                         modifier = Modifier
-                            .size(64.dp)
+                            .size(66.dp)
                             .scale(pulseScale)
                             .clip(CircleShape)
-                            .background(KothonRose.copy(alpha = 0.25f))
+                            .background(KothonRose.copy(alpha = 0.26f))
                     )
                 }
 
-                var pressStartTime by remember { mutableStateOf<Long>(0L) }
+                var pressStartTime by remember { mutableStateOf(0L) }
 
                 val mainButtonContentDescription = when {
                     voiceDisabled -> "Voice disabled"
@@ -388,9 +412,10 @@ fun VoiceButton(
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(58.dp)
+                        .size(60.dp)
                         .clip(CircleShape)
                         .background(buttonBgColor)
+                        .border(1.2.dp, Color.White.copy(alpha = 0.35f), CircleShape)
                         .pointerInput(state, voiceDisabled) {
                             detectTapGestures(
                                 onPress = {
@@ -405,20 +430,16 @@ fun VoiceButton(
                                         return@detectTapGestures
                                     }
                                     if (state == VoiceButtonState.RECORDING) {
-                                        // Tap to stop
                                         tryAwaitRelease()
                                         onRecordStop()
                                     } else {
-                                        // Tap or hold to start
                                         pressStartTime = System.currentTimeMillis()
                                         onRecordStart()
-                                        val released = tryAwaitRelease()
+                                        tryAwaitRelease()
                                         val duration = System.currentTimeMillis() - pressStartTime
                                         if (duration > 500L) {
-                                            // User held for > 500ms and released -> stop recording
                                             onRecordStop()
                                         }
-                                        // If <= 500ms, user tapped to start recording -> keep recording!
                                     }
                                 }
                             )
@@ -433,7 +454,7 @@ fun VoiceButton(
                         voiceDisabled -> {
                             Icon(
                                 imageVector = Icons.Default.MicOff,
-                                contentDescription = "",
+                                contentDescription = null,
                                 tint = KothonTextPrimary,
                                 modifier = Modifier.size(26.dp)
                             )
@@ -441,7 +462,7 @@ fun VoiceButton(
                         state == VoiceButtonState.RECORDING -> {
                             Icon(
                                 imageVector = Icons.Default.Stop,
-                                contentDescription = "",
+                                contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(26.dp)
                             )
@@ -456,7 +477,7 @@ fun VoiceButton(
                         state == VoiceButtonState.PERMISSION_REQUIRED -> {
                             Icon(
                                 imageVector = Icons.Default.MicOff,
-                                contentDescription = "",
+                                contentDescription = null,
                                 tint = KothonDarkBg,
                                 modifier = Modifier.size(26.dp)
                             )
@@ -464,7 +485,7 @@ fun VoiceButton(
                         state == VoiceButtonState.ERROR -> {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
-                                contentDescription = "",
+                                contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(26.dp)
                             )
@@ -472,7 +493,7 @@ fun VoiceButton(
                         else -> {
                             Icon(
                                 imageVector = Icons.Default.Mic,
-                                contentDescription = "",
+                                contentDescription = null,
                                 tint = KothonDarkBg,
                                 modifier = Modifier
                                     .size(30.dp)

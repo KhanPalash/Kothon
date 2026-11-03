@@ -1,30 +1,22 @@
 package com.whisperflow.settings
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import com.example.ui.theme.MyApplicationTheme
+import com.example.MainActivity
 
+/**
+ * Legacy entry point kept for backwards compatibility; redirects immediately
+ * to the unified Home screen in [MainActivity].
+ */
 class SettingsActivity : ComponentActivity() {
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-        )
-
-        val preferences = KothonPreferences(this)
-
-        setContent {
-            MyApplicationTheme {
-                SettingsScreen(
-                    preferences = preferences,
-                    onBack = { finish() }
-                )
+        startActivity(
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
-        }
+        )
+        finish()
     }
 }

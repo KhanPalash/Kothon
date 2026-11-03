@@ -5,7 +5,6 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Base64
 import android.util.Log
-import com.example.BuildConfig
 import com.whisperflow.model.LanguageCatalog
 import com.whisperflow.settings.KothonPreferences
 import okhttp3.MediaType.Companion.toMediaType
@@ -43,9 +42,9 @@ class TranscriptionClient(private val context: Context) {
     private val validLangCodes = LanguageCatalog.ALL_LANGUAGES.map { it.code }.toSet() + setOf("auto", "original")
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(25, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
-        .writeTimeout(45, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(40, TimeUnit.SECONDS)
+        .writeTimeout(40, TimeUnit.SECONDS)
         .build()
 
     private fun validateProvider(provider: String): String =
@@ -56,6 +55,15 @@ class TranscriptionClient(private val context: Context) {
 
     private fun validateLangCode(code: String): String =
         if (validLangCodes.contains(code)) code else "auto"
+
+    fun sanitizeApiKey(rawKey: String): String {
+        return rawKey
+            .trim()
+            .removePrefix("Bearer ")
+            .removePrefix("bearer ")
+            .trim()
+            .trim('"', '\'', ' ', '\n', '\r', '\t')
+    }
 
     // Gemini active models with fallback chain
     val geminiFallbackModels = listOf(
@@ -85,11 +93,11 @@ class TranscriptionClient(private val context: Context) {
         if (!isOnline()) {
             return Pair(false, "Device is offline. Check your internet connection.")
         }
+        val cleanKey = sanitizeApiKey(apiKey)
         return try {
             when (provider) {
                 KothonPreferences.PROVIDER_GEMINI -> {
-                    val key = apiKey
-                    if (key.isBlank()) {
+                    if (cleanKey.isBlank()) {
                         return Pair(false, "Gemini API key is empty.")
                     }
                     var success = false
@@ -99,16 +107,16 @@ class TranscriptionClient(private val context: Context) {
                             val url = "https://generativelanguage.googleapis.com/v1beta/models/$model"
                             val request = Request.Builder()
                                 .url(url)
-                                .addHeader("x-goog-api-key", key)
+                                .addHeader("x-goog-api-key", cleanKey)
                                 .get()
                                 .build()
                             httpClient.newCall(request).execute().use { resp ->
                                 if (resp.isSuccessful) {
                                     success = true
-                                    lastMsg = "Gemini ($model) connected successfully! ✓"
+                                    lastMsg = "Gemini ($model) connected! ✓"
                                     return@use
                                 } else {
-                                    lastMsg = "Gemini ($model): ${resp.code}"
+                                    lastMsg = "Gemini ($model): HTTP ${resp.code}"
                                 }
                             }
                             if (success) return Pair(true, lastMsg)
@@ -119,39 +127,39 @@ class TranscriptionClient(private val context: Context) {
                     Pair(success, lastMsg)
                 }
                 KothonPreferences.PROVIDER_NVIDIA -> {
-                    if (apiKey.isBlank()) return Pair(false, "NVIDIA API key is empty.")
+                    if (cleanKey.isBlank()) return Pair(false, "NVIDIA API key is empty.")
                     val request = Request.Builder()
                         .url("https://integrate.api.nvidia.com/v1/models")
-                        .header("Authorization", "Bearer $apiKey")
+                        .header("Authorization", "Bearer $cleanKey")
                         .get()
                         .build()
                     httpClient.newCall(request).execute().use { resp ->
-                        if (resp.isSuccessful) Pair(true, "NVIDIA Nemotron connected successfully! ✓")
-                        else Pair(false, "NVIDIA error: ${resp.code}")
+                        if (resp.isSuccessful) Pair(true, "NVIDIA NIM connected! ✓")
+                        else Pair(false, "NVIDIA error: HTTP ${resp.code}")
                     }
                 }
                 KothonPreferences.PROVIDER_GROQ -> {
-                    if (apiKey.isBlank()) return Pair(false, "Groq API key is empty.")
+                    if (cleanKey.isBlank()) return Pair(false, "Groq API key is empty.")
                     val request = Request.Builder()
                         .url("https://api.groq.com/openai/v1/models")
-                        .header("Authorization", "Bearer $apiKey")
+                        .header("Authorization", "Bearer $cleanKey")
                         .get()
                         .build()
                     httpClient.newCall(request).execute().use { resp ->
-                        if (resp.isSuccessful) Pair(true, "Groq connected successfully! ✓")
-                        else Pair(false, "Groq error: ${resp.code}")
+                        if (resp.isSuccessful) Pair(true, "Groq Whisper + Llama connected! ✓")
+                        else Pair(false, "Groq error: HTTP ${resp.code}")
                     }
                 }
                 KothonPreferences.PROVIDER_OPENAI -> {
-                    if (apiKey.isBlank()) return Pair(false, "OpenAI API key is empty.")
+                    if (cleanKey.isBlank()) return Pair(false, "OpenAI API key is empty.")
                     val request = Request.Builder()
                         .url("https://api.openai.com/v1/models")
-                        .header("Authorization", "Bearer $apiKey")
+                        .header("Authorization", "Bearer $cleanKey")
                         .get()
                         .build()
                     httpClient.newCall(request).execute().use { resp ->
-                        if (resp.isSuccessful) Pair(true, "OpenAI connected successfully! ✓")
-                        else Pair(false, "OpenAI error: ${resp.code}")
+                        if (resp.isSuccessful) Pair(true, "OpenAI Whisper + GPT connected! ✓")
+                        else Pair(false, "OpenAI error: HTTP ${resp.code}")
                     }
                 }
                 else -> Pair(false, "Unknown provider")
@@ -190,38 +198,39 @@ class TranscriptionClient(private val context: Context) {
         }
 
         val provider = validateProvider(preferences.provider)
-        val customKey = preferences.getApiKeyForProvider(provider).trim()
+        val customKey = sanitizeApiKey(preferences.getApiKeyForProvider(provider))
         val sourceLangCode = validateLangCode(sourceLanguageCode)
-        val targetLangCode = validateLangCode(targetLanguageCode)
+        val effectiveTargetCode = if (!preferences.isTranslateEnabled) "original" else validateLangCode(targetLanguageCode)
         val validatedTone = validateTone(tone)
         val sourceLangObj = LanguageCatalog.findByCode(sourceLangCode)
-        val targetLangObj = LanguageCatalog.findByCode(targetLangCode)
+        val targetLangObj = LanguageCatalog.findByCode(effectiveTargetCode)
 
         return try {
             when (provider) {
                 KothonPreferences.PROVIDER_NVIDIA -> {
-                    if (customKey.isBlank()) throw IOException("NVIDIA API key is missing.")
-                    refineWithNvidiaNim(trimmed, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
+                    if (customKey.isBlank()) throw IOException("NVIDIA API key is missing. Tap 'Get API' or enter your key.")
+                    refineWithNvidiaNim(trimmed, customKey, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar).refinedText
                 }
                 KothonPreferences.PROVIDER_GROQ -> {
-                    if (customKey.isBlank()) throw IOException("Groq API key is missing.")
-                    refineWithGroq(trimmed, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
+                    if (customKey.isBlank()) throw IOException("Groq API key is missing. Tap 'Get API' or enter your key.")
+                    refineWithGroq(trimmed, customKey, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar).refinedText
                 }
                 KothonPreferences.PROVIDER_OPENAI -> {
-                    if (customKey.isBlank()) throw IOException("OpenAI API key is missing.")
-                    refineWithOpenAi(trimmed, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
+                    if (customKey.isBlank()) throw IOException("OpenAI API key is missing. Tap 'Get API' or enter your key.")
+                    refineWithOpenAi(trimmed, customKey, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar).refinedText
                 }
                 else -> {
-                    refineWithGemini(trimmed, customKey, sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
+                    refineWithGemini(trimmed, customKey, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar).refinedText
                 }
             }
         } catch (e: Exception) {
             Log.w("TranscriptionClient", "Text refinement failed via $provider: ${e.message}")
-            if (provider != KothonPreferences.PROVIDER_GEMINI) {
+            val geminiBackupKey = sanitizeApiKey(preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_GEMINI))
+            if (provider != KothonPreferences.PROVIDER_GEMINI && geminiBackupKey.isNotBlank()) {
                 try {
-                    refineWithGemini(trimmed, "", sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar).refinedText
-                } catch (fallbackEx: Exception) {
-                    throw IOException("$provider error: ${e.message}. (Gemini fallback: ${fallbackEx.message})", e)
+                    refineWithGemini(trimmed, geminiBackupKey, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar).refinedText
+                } catch (_: Exception) {
+                    throw (e as? IOException) ?: IOException("$provider error: ${e.message}", e)
                 }
             } else {
                 throw (e as? IOException) ?: IOException(e.message ?: "Refinement error", e)
@@ -247,49 +256,49 @@ class TranscriptionClient(private val context: Context) {
         }
 
         val provider = validateProvider(preferences.provider)
-        val customKey = preferences.getApiKeyForProvider(provider).trim()
+        val customKey = sanitizeApiKey(preferences.getApiKeyForProvider(provider))
         val sourceLangCode = validateLangCode(sourceLanguageCode)
-        val targetLangCode = validateLangCode(targetLanguageCode)
+        val effectiveTargetCode = if (!preferences.isTranslateEnabled) "original" else validateLangCode(targetLanguageCode)
         val validatedTone = validateTone(tone)
         val sourceLangObj = LanguageCatalog.findByCode(sourceLangCode)
-        val targetLangObj = LanguageCatalog.findByCode(targetLangCode)
+        val targetLangObj = LanguageCatalog.findByCode(effectiveTargetCode)
 
         return try {
             when (provider) {
                 KothonPreferences.PROVIDER_NVIDIA -> {
                     if (customKey.isBlank()) {
-                        throw IOException("NVIDIA API key is missing. Please enter your NVIDIA NIM API key in Settings (gear icon) or switch to Gemini (Built-in).")
+                        throw IOException("NVIDIA API key is missing. Tap 'Get API' on the Home screen to get a key.")
                     }
-                    callNvidiaNemotron(audioFile, customKey, sourceLangObj.name, targetLangObj.name, targetLangCode, validatedTone, removeFillers, fixGrammar)
+                    callNvidiaNemotron(audioFile, customKey, sourceLangCode, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar)
                 }
                 KothonPreferences.PROVIDER_GROQ -> {
                     if (customKey.isBlank()) {
-                        throw IOException("Groq API key is missing. Please enter your Groq API key in Settings (gear icon) or switch to Gemini (Built-in).")
+                        throw IOException("Groq API key is missing. Tap 'Get API' on the Home screen to get a key.")
                     }
-                    callGroq(audioFile, customKey, sourceLangObj.name, targetLangObj.name, targetLangCode, validatedTone, removeFillers, fixGrammar)
+                    callGroq(audioFile, customKey, sourceLangCode, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar)
                 }
                 KothonPreferences.PROVIDER_OPENAI -> {
                     if (customKey.isBlank()) {
-                        throw IOException("OpenAI API key is missing. Please enter your OpenAI API key in Settings (gear icon) or switch to Gemini (Built-in).")
+                        throw IOException("OpenAI API key is missing. Tap 'Get API' on the Home screen to get a key.")
                     }
-                    callOpenAi(audioFile, customKey, sourceLangObj.name, targetLangObj.name, targetLangCode, validatedTone, removeFillers, fixGrammar)
+                    callOpenAi(audioFile, customKey, sourceLangCode, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar)
                 }
                 else -> {
-                    callGeminiWithFallbacks(audioFile, customKey, sourceLangObj.name, targetLangObj.name, targetLangCode, validatedTone, removeFillers, fixGrammar)
+                    callGeminiWithFallbacks(audioFile, customKey, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar)
                 }
             }
         } catch (e: Exception) {
             Log.w("TranscriptionClient", "$provider failed: ${e.message}", e)
             val msg = e.message ?: ""
-            if (provider != KothonPreferences.PROVIDER_GEMINI) {
-                if (msg.contains("API key is missing", ignoreCase = true)) {
-                    throw (e as? IOException) ?: IOException(msg, e)
-                }
-                // If custom provider had a service or network error, attempt smooth Gemini fallback
+            val geminiBackupKey = sanitizeApiKey(preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_GEMINI))
+            if (provider != KothonPreferences.PROVIDER_GEMINI &&
+                !msg.contains("API key is missing", ignoreCase = true) &&
+                geminiBackupKey.isNotBlank()
+            ) {
                 try {
-                    callGeminiWithFallbacks(audioFile, "", sourceLangObj.name, targetLangObj.name, targetLanguageCode, tone, removeFillers, fixGrammar)
-                } catch (fallbackEx: Exception) {
-                    throw IOException("$provider error: ${e.message}. (Gemini fallback: ${fallbackEx.message})", e)
+                    callGeminiWithFallbacks(audioFile, geminiBackupKey, sourceLangObj.name, targetLangObj.name, effectiveTargetCode, validatedTone, removeFillers, fixGrammar)
+                } catch (_: Exception) {
+                    throw (e as? IOException) ?: IOException("$provider error: ${e.message}", e)
                 }
             } else {
                 throw (e as? IOException) ?: IOException(msg.ifBlank { "Transcription error" }, e)
@@ -310,9 +319,11 @@ class TranscriptionClient(private val context: Context) {
         removeFillers: Boolean,
         fixGrammar: Boolean
     ): TranscriptionResult {
-        val apiKey = customKey
+        val apiKey = sanitizeApiKey(customKey.ifBlank {
+            preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_GEMINI)
+        })
         if (apiKey.isEmpty()) {
-            throw IOException("Gemini API key is not configured. Please enter your API key in Settings.")
+            throw IOException("Gemini API key is not configured. Tap 'Get API' and paste your Gemini API key.")
         }
 
         val audioBytes = audioFile.readBytes()
@@ -333,8 +344,8 @@ class TranscriptionClient(private val context: Context) {
             2. If the audio is silent, noisy, or contains NO spoken human words, return strictly:
                {"detected_language": "None", "raw_transcript": "", "refined_text": ""}
             3. NEVER transcribe or echo instructions, prompts, or system messages.
-            4. Remove stuttering, false starts, and filler words (e.g. 'um', 'uh', 'mane', 'ar ki', 'you know') if requested.
-            5. Correct grammar, punctuation, and refine tone into $validatedTone.
+            4. Remove stuttering, false starts, and filler words (e.g. 'um', 'uh', 'mane', 'ar ki', 'you know') if removeFillers=$removeFillers.
+            5. Correct grammar, punctuation, and refine tone into $validatedTone (fixGrammar=$fixGrammar).
             6. $translationInstruction
             7. Return ONLY valid JSON with keys: "detected_language", "raw_transcript", "refined_text".
                Do not return nested language arrays. Output the final refined sentence directly in "refined_text".
@@ -412,7 +423,8 @@ class TranscriptionClient(private val context: Context) {
                             val parsed = parseUniversalOutput(resultText, targetLangName, targetLangCode, tone)
                             if (parsed.rawTranscript.contains("Kothon AI", ignoreCase = true) ||
                                 parsed.rawTranscript.contains("WhisperFlow", ignoreCase = true) ||
-                                parsed.refinedText.isBlank()) {
+                                parsed.refinedText.isBlank()
+                            ) {
                                 throw IOException("No speech detected. Please hold the mic and speak clearly.")
                             }
                             return parsed
@@ -424,7 +436,8 @@ class TranscriptionClient(private val context: Context) {
             }
         }
 
-        throw (lastException as? IOException) ?: IOException("Gemini transcription failed across all fallback models: ${lastException?.message}", lastException)
+        throw (lastException as? IOException)
+            ?: IOException("Gemini transcription failed across all fallback models: ${lastException?.message}", lastException)
     }
 
     private fun refineWithGemini(
@@ -437,9 +450,11 @@ class TranscriptionClient(private val context: Context) {
         removeFillers: Boolean,
         fixGrammar: Boolean
     ): TranscriptionResult {
-        val apiKey = customKey
+        val apiKey = sanitizeApiKey(customKey.ifBlank {
+            preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_GEMINI)
+        })
         if (apiKey.isEmpty()) {
-            throw IOException("Gemini API key is not configured. Please enter your API key in Settings.")
+            throw IOException("Gemini API key is not configured. Tap 'Get API' and paste your Gemini API key.")
         }
 
         val translationInstruction = if (targetLangCode == "original") {
@@ -454,8 +469,8 @@ class TranscriptionClient(private val context: Context) {
             Your task is strictly to polish the provided raw spoken text transcript.
             RULES:
             1. Punctuate, capitalize, and polish into tone: $validatedTone.
-            2. If Remove Fillers is true, strip stuttering and filler words (e.g. 'um', 'uh', 'mane', 'ar ki', 'you know').
-            3. If Fix Grammar is true, correct grammar, spelling, and tense agreement.
+            2. If Remove Fillers is true ($removeFillers), strip stuttering and filler words (e.g. 'um', 'uh', 'mane', 'ar ki', 'you know').
+            3. If Fix Grammar is true ($fixGrammar), correct grammar, spelling, and tense agreement.
             4. $translationInstruction
             5. Return strictly JSON: {"detected_language": "<Language>", "refined_text": "<Output text>"}
                Do not return nested language arrays. Output the final refined sentence directly in "refined_text".
@@ -505,7 +520,7 @@ class TranscriptionClient(private val context: Context) {
                     if (!response.isSuccessful) {
                         val errMsg = try {
                             JSONObject(responseBody).getJSONObject("error").getString("message")
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             responseBody
                         }
                         if (response.code == 404 || response.code == 429 || response.code == 503) {
@@ -540,15 +555,17 @@ class TranscriptionClient(private val context: Context) {
             }
         }
 
-        throw (lastException as? IOException) ?: IOException("Gemini text refinement failed across fallback models: ${lastException?.message}", lastException)
+        throw (lastException as? IOException)
+            ?: IOException("Gemini text refinement failed across fallback models: ${lastException?.message}", lastException)
     }
 
     /**
-     * NVIDIA Nemotron-3.5-Transcribe-30B-A4B Integration
+     * NVIDIA NIM Multi-Stage Audio + Chat Integration
      */
     private fun callNvidiaNemotron(
         audioFile: File,
         apiKey: String,
+        sourceLangCode: String,
         sourceLangName: String,
         targetLangName: String,
         targetLangCode: String,
@@ -556,62 +573,160 @@ class TranscriptionClient(private val context: Context) {
         removeFillers: Boolean,
         fixGrammar: Boolean
     ): TranscriptionResult {
-        if (apiKey.isEmpty()) {
-            throw IOException("NVIDIA API key is missing. Please enter your NVIDIA NIM API key in Settings or switch to Gemini.")
+        val cleanKey = sanitizeApiKey(apiKey)
+        if (cleanKey.isEmpty()) {
+            throw IOException("NVIDIA API key is missing. Tap 'Get API' to configure your NVIDIA NIM key.")
         }
 
-        val nemotronModels = listOf(
+        var rawTranscript = ""
+
+        // Stage 1: Try NVIDIA NIM Audio Transcriptions endpoint (Whisper / Parakeet / Nemotron)
+        val audioModels = listOf(
+            "openai/whisper-large-v3",
+            "nvidia/parakeet-ctc-1.1b",
             "nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B",
             "nvidia/nemotron-3.5-transcribe-30b-a4b"
         )
-
-        var rawTranscript = ""
-        var lastNvidiaEx: Exception? = null
-
-        // 1. Try NVIDIA Nemotron Speech-to-Text API
-        for (modelName in nemotronModels) {
+        for (modelName in audioModels) {
             try {
-                val requestBody = MultipartBody.Builder()
+                val builder = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
-                    .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/m4a".toMediaType()))
+                    .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/mp4".toMediaType()))
                     .addFormDataPart("model", modelName)
-                    .addFormDataPart("prompt", "Transcribe the audio speech accurately in $targetLangName with professional tone.")
-                    .build()
+                if (sourceLangCode.length == 2 && sourceLangCode != "auto") {
+                    builder.addFormDataPart("language", sourceLangCode.lowercase())
+                }
 
                 val request = Request.Builder()
                     .url("https://integrate.api.nvidia.com/v1/audio/transcriptions")
-                    .header("Authorization", "Bearer $apiKey")
-                    .post(requestBody)
+                    .header("Authorization", "Bearer $cleanKey")
+                    .post(builder.build())
                     .build()
 
                 httpClient.newCall(request).execute().use { response ->
                     val body = response.body?.string() ?: ""
                     if (response.isSuccessful) {
                         rawTranscript = JSONObject(body).optString("text", "").trim()
-                        if (rawTranscript.isNotBlank()) return@use
-                    } else {
-                        Log.w("TranscriptionClient", "NVIDIA Nemotron $modelName transcriptions endpoint returned ${response.code}: $body")
                     }
                 }
                 if (rawTranscript.isNotBlank()) break
             } catch (e: Exception) {
-                lastNvidiaEx = e
+                Log.w("TranscriptionClient", "NVIDIA audio endpoint $modelName error: ${e.message}")
             }
         }
 
-        // If audio transcription endpoint returned error or needs LLM refinement:
+        // Stage 2: Try NVIDIA NIM Multimodal Chat Completions with inline base64 audio
         if (rawTranscript.isBlank()) {
-            // Use Gemini fallback for audio transcription, then refine with NVIDIA Nemotron LLM
-            val geminiResult = callGeminiWithFallbacks(audioFile, "", sourceLangName, targetLangName, "original", tone, false, false)
-            rawTranscript = geminiResult.rawTranscript.ifBlank { geminiResult.refinedText }
+            val base64Audio = Base64.encodeToString(audioFile.readBytes(), Base64.NO_WRAP)
+            val multimodalModels = listOf(
+                "google/gemma-3n-e4b-it",
+                "microsoft/phi-4-multimodal-instruct"
+            )
+            for (mmModel in multimodalModels) {
+                try {
+                    val chatJson = JSONObject().apply {
+                        put("model", mmModel)
+                        put("messages", JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("role", "user")
+                                put("content", JSONArray().apply {
+                                    put(JSONObject().apply {
+                                        put("type", "text")
+                                        put(
+                                            "text",
+                                            "Transcribe the spoken words in this audio accurately (expected language: $sourceLangName). Output only the spoken transcript."
+                                        )
+                                    })
+                                    put(JSONObject().apply {
+                                        put("type", "audio_url")
+                                        put("audio_url", JSONObject().apply {
+                                            put("url", "data:audio/mp4;base64,$base64Audio")
+                                        })
+                                    })
+                                })
+                            })
+                        })
+                        put("temperature", 0.1)
+                        put("max_tokens", 800)
+                    }
+
+                    val mmRequest = Request.Builder()
+                        .url("https://integrate.api.nvidia.com/v1/chat/completions")
+                        .header("Authorization", "Bearer $cleanKey")
+                        .post(chatJson.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+
+                    httpClient.newCall(mmRequest).execute().use { response ->
+                        val body = response.body?.string() ?: ""
+                        if (response.isSuccessful) {
+                            val choices = JSONObject(body).optJSONArray("choices")
+                            if (choices != null && choices.length() > 0) {
+                                val text = choices.getJSONObject(0)
+                                    .getJSONObject("message")
+                                    .optString("content", "")
+                                    .trim()
+                                if (text.isNotBlank()) {
+                                    rawTranscript = text
+                                }
+                            }
+                        }
+                    }
+                    if (rawTranscript.isNotBlank()) break
+                } catch (e: Exception) {
+                    Log.w("TranscriptionClient", "NVIDIA multimodal $mmModel failed: ${e.message}")
+                }
+            }
+        }
+
+        // Stage 3: If NVIDIA audio endpoints are unavailable for this key, check configured backup STT keys (Groq / OpenAI / Gemini)
+        if (rawTranscript.isBlank()) {
+            val groqKey = sanitizeApiKey(preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_GROQ))
+            val openAiKey = sanitizeApiKey(preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_OPENAI))
+            val geminiKey = sanitizeApiKey(preferences.getApiKeyForProvider(KothonPreferences.PROVIDER_GEMINI))
+
+            if (groqKey.isNotBlank()) {
+                try {
+                    rawTranscript = transcribeAudioWithGroqWhisper(audioFile, groqKey, sourceLangCode)
+                } catch (_: Exception) {}
+            }
+            if (rawTranscript.isBlank() && openAiKey.isNotBlank()) {
+                try {
+                    rawTranscript = transcribeAudioWithOpenAiWhisper(audioFile, openAiKey, sourceLangCode)
+                } catch (_: Exception) {}
+            }
+            if (rawTranscript.isBlank() && geminiKey.isNotBlank()) {
+                try {
+                    val geminiResult = callGeminiWithFallbacks(
+                        audioFile,
+                        geminiKey,
+                        sourceLangName,
+                        targetLangName,
+                        "original",
+                        tone,
+                        false,
+                        false
+                    )
+                    rawTranscript = geminiResult.rawTranscript.ifBlank { geminiResult.refinedText }
+                } catch (_: Exception) {}
+            }
         }
 
         if (rawTranscript.isBlank()) {
-            throw IOException("No speech detected. Please speak into the mic.")
+            throw IOException("NVIDIA audio transcription requires Live Dictation mode or a secondary STT key (Groq/Gemini). Switch mode to 'Live' to stream speech and refine with NVIDIA NIM!")
         }
 
-        // 2. Refine & Translate using NVIDIA NIM Chat Completion
-        return refineWithNvidiaNim(rawTranscript, apiKey, sourceLangName, targetLangName, targetLangCode, tone, removeFillers, fixGrammar)
+        return try {
+            refineWithNvidiaNim(rawTranscript, cleanKey, sourceLangName, targetLangName, targetLangCode, tone, removeFillers, fixGrammar)
+        } catch (e: Exception) {
+            Log.w("TranscriptionClient", "NVIDIA NIM refinement failed, returning raw transcript: ${e.message}")
+            TranscriptionResult(
+                rawTranscript = rawTranscript,
+                refinedText = rawTranscript,
+                detectedLanguage = sourceLangName,
+                targetLanguage = targetLangName,
+                tone = tone
+            )
+        }
     }
 
     private fun refineWithNvidiaNim(
@@ -624,55 +739,137 @@ class TranscriptionClient(private val context: Context) {
         removeFillers: Boolean,
         fixGrammar: Boolean
     ): TranscriptionResult {
+        val cleanKey = sanitizeApiKey(apiKey)
         val translationPrompt = if (targetLangCode == "original") {
-            "Keep the output in the same language as spoken."
+            "Keep the output in the same language as spoken. Do NOT translate."
         } else {
-            "Translate into $targetLangName."
+            "Translate the refined text into $targetLangName."
         }
 
-        val prompt = """
-            You are Kothon AI powered by NVIDIA Nemotron.
-            Refine this transcript into clean, professional text ('shikrito' style).
+        val systemPrompt = """
+            You are Kothon AI powered by NVIDIA NIM.
+            Refine spoken transcripts into clean, natural text.
             Tone: $tone.
             Remove filler words: $removeFillers. Fix grammar: $fixGrammar.
             $translationPrompt
-            Raw Transcript: "$rawTranscript"
             Return strictly JSON: {"detected_language": "<Language>", "refined_text": "<Output text>"}
-            DO NOT return language arrays like {"Bengali": ["..."]}. Return a single string in "refined_text".
+            DO NOT return language arrays. Return a single string in "refined_text".
         """.trimIndent()
 
-        val chatJson = JSONObject().apply {
-            put("model", "meta/llama-3.3-70b-instruct")
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", prompt)
-                })
-            })
-            put("temperature", 0.15)
-        }
+        val nvidiaChatModels = listOf(
+            "meta/llama-3.3-70b-instruct",
+            "nvidia/llama-3.1-nemotron-70b-instruct",
+            "meta/llama-3.1-70b-instruct",
+            "meta/llama-3.1-8b-instruct"
+        )
 
-        val chatRequest = Request.Builder()
-            .url("https://integrate.api.nvidia.com/v1/chat/completions")
-            .header("Authorization", "Bearer $apiKey")
-            .post(chatJson.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+        var lastException: Exception? = null
 
-        return httpClient.newCall(chatRequest).execute().use { response ->
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                val errMsg = try { JSONObject(body).getJSONObject("error").getString("message") } catch (e: Exception) { body }
-                throw IOException("NVIDIA NIM failed (${response.code}): $errMsg")
+        for (modelName in nvidiaChatModels) {
+            try {
+                val chatJson = JSONObject().apply {
+                    put("model", modelName)
+                    put("messages", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("role", "system")
+                            put("content", systemPrompt)
+                        })
+                        put(JSONObject().apply {
+                            put("role", "user")
+                            put("content", rawTranscript)
+                        })
+                    })
+                    put("temperature", 0.15)
+                    put("max_tokens", 1000)
+                }
+
+                val chatRequest = Request.Builder()
+                    .url("https://integrate.api.nvidia.com/v1/chat/completions")
+                    .header("Authorization", "Bearer $cleanKey")
+                    .post(chatJson.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                httpClient.newCall(chatRequest).execute().use { response ->
+                    val body = response.body?.string() ?: ""
+                    if (!response.isSuccessful) {
+                        val errMsg = try {
+                            JSONObject(body).getJSONObject("error").getString("message")
+                        } catch (_: Exception) {
+                            body
+                        }
+                        throw IOException("NVIDIA NIM ($modelName) failed (${response.code}): $errMsg")
+                    }
+                    val choices = JSONObject(body).getJSONArray("choices")
+                    val content = choices.getJSONObject(0).getJSONObject("message").getString("content").trim()
+                    if (content.isNotBlank()) {
+                        return parseUniversalOutput(content, targetLangName, targetLangCode, tone).copy(rawTranscript = rawTranscript)
+                    }
+                }
+            } catch (e: Exception) {
+                lastException = e
             }
-            val choices = JSONObject(body).getJSONArray("choices")
-            val content = choices.getJSONObject(0).getJSONObject("message").getString("content").trim()
-            parseUniversalOutput(content, targetLangName, targetLangCode, tone).copy(rawTranscript = rawTranscript)
         }
+
+        throw (lastException as? IOException) ?: IOException("NVIDIA NIM refinement failed: ${lastException?.message}", lastException)
+    }
+
+    private fun transcribeAudioWithOpenAiWhisper(
+        audioFile: File,
+        cleanKey: String,
+        sourceLangCode: String
+    ): String {
+        val models = listOf("whisper-1", "gpt-4o-mini-transcribe")
+        var lastEx: Exception? = null
+
+        for (modelName in models) {
+            val includeLangAttempts = if (sourceLangCode.length == 2 && sourceLangCode != "auto") {
+                listOf(true, false)
+            } else {
+                listOf(false)
+            }
+            for (withLang in includeLangAttempts) {
+                try {
+                    val builder = MultipartBody.Builder()
+                        .setType(MultipartBody.FORM)
+                        .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/mp4".toMediaType()))
+                        .addFormDataPart("model", modelName)
+                    if (withLang) {
+                        builder.addFormDataPart("language", sourceLangCode.lowercase())
+                    }
+
+                    val whisperRequest = Request.Builder()
+                        .url("https://api.openai.com/v1/audio/transcriptions")
+                        .header("Authorization", "Bearer $cleanKey")
+                        .post(builder.build())
+                        .build()
+
+                    httpClient.newCall(whisperRequest).execute().use { response ->
+                        val body = response.body?.string() ?: ""
+                        if (!response.isSuccessful) {
+                            val errMsg = try {
+                                JSONObject(body).getJSONObject("error").getString("message")
+                            } catch (_: Exception) {
+                                body
+                            }
+                            throw IOException("OpenAI Whisper (${response.code}): $errMsg")
+                        }
+                        val transcript = JSONObject(body).optString("text", "").trim()
+                        if (transcript.isNotBlank()) {
+                            return transcript
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastEx = e
+                }
+            }
+        }
+        throw (lastEx as? IOException) ?: IOException("OpenAI Whisper failed: ${lastEx?.message}", lastEx)
     }
 
     private fun callOpenAi(
         audioFile: File,
         apiKey: String,
+        sourceLangCode: String,
         sourceLangName: String,
         targetLangName: String,
         targetLangCode: String,
@@ -680,36 +877,28 @@ class TranscriptionClient(private val context: Context) {
         removeFillers: Boolean,
         fixGrammar: Boolean
     ): TranscriptionResult {
-        if (apiKey.isEmpty()) {
-            throw IOException("OpenAI API key is missing. Please enter your API key in Settings or switch to Gemini.")
+        val cleanKey = sanitizeApiKey(apiKey)
+        if (cleanKey.isEmpty()) {
+            throw IOException("OpenAI API key is missing. Tap 'Get API' to configure your key.")
         }
 
-        val requestBody = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/m4a".toMediaType()))
-            .addFormDataPart("model", "whisper-1")
-            .build()
-
-        val whisperRequest = Request.Builder()
-            .url("https://api.openai.com/v1/audio/transcriptions")
-            .header("Authorization", "Bearer $apiKey")
-            .post(requestBody)
-            .build()
-
-        val rawTranscript = httpClient.newCall(whisperRequest).execute().use { response ->
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                val errMsg = try { JSONObject(body).getJSONObject("error").getString("message") } catch (e: Exception) { body }
-                throw IOException("OpenAI Whisper failed (${response.code}): $errMsg")
-            }
-            JSONObject(body).optString("text", "").trim()
-        }
-
+        val rawTranscript = transcribeAudioWithOpenAiWhisper(audioFile, cleanKey, sourceLangCode)
         if (rawTranscript.isBlank()) {
             throw IOException("No speech detected by OpenAI Whisper. Please speak clearly into the mic.")
         }
 
-        return refineWithOpenAi(rawTranscript, apiKey, sourceLangName, targetLangName, targetLangCode, tone, removeFillers, fixGrammar)
+        return try {
+            refineWithOpenAi(rawTranscript, cleanKey, sourceLangName, targetLangName, targetLangCode, tone, removeFillers, fixGrammar)
+        } catch (e: Exception) {
+            Log.w("TranscriptionClient", "OpenAI GPT refinement failed, returning Whisper transcript: ${e.message}")
+            TranscriptionResult(
+                rawTranscript = rawTranscript,
+                refinedText = rawTranscript,
+                detectedLanguage = sourceLangName,
+                targetLanguage = targetLangName,
+                tone = tone
+            )
+        }
     }
 
     private fun refineWithOpenAi(
@@ -722,54 +911,131 @@ class TranscriptionClient(private val context: Context) {
         removeFillers: Boolean,
         fixGrammar: Boolean
     ): TranscriptionResult {
+        val cleanKey = sanitizeApiKey(apiKey)
         val translationPrompt = if (targetLangCode == "original") {
-            "Keep the output in the same language as spoken."
+            "Keep the output in the same language as spoken. Do NOT translate."
         } else {
-            "Translate into $targetLangName."
+            "Translate the refined text into $targetLangName."
         }
 
-        val prompt = """
-            Refine this transcript into clean, professional text ('shikrito' style).
+        val systemPrompt = """
+            You are Kothon AI. Refine the user's spoken transcript into clean, polished text.
             Tone: $tone.
             Remove filler words: $removeFillers. Fix grammar: $fixGrammar.
             $translationPrompt
-            Raw Transcript: "$rawTranscript"
             Return strictly JSON: {"detected_language": "<Language>", "refined_text": "<Output text>"}
-            DO NOT return language arrays like {"English": ["..."]}. Return single string in "refined_text".
+            DO NOT return language arrays. Return a single string in "refined_text".
         """.trimIndent()
 
-        val chatJson = JSONObject().apply {
-            put("model", "gpt-4o-mini")
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", prompt)
-                })
-            })
-            put("temperature", 0.15)
-        }
+        val models = listOf("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo")
+        var lastEx: Exception? = null
 
-        val chatRequest = Request.Builder()
-            .url("https://api.openai.com/v1/chat/completions")
-            .header("Authorization", "Bearer $apiKey")
-            .post(chatJson.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+        for (modelName in models) {
+            try {
+                val chatJson = JSONObject().apply {
+                    put("model", modelName)
+                    put("messages", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("role", "system")
+                            put("content", systemPrompt)
+                        })
+                        put(JSONObject().apply {
+                            put("role", "user")
+                            put("content", rawTranscript)
+                        })
+                    })
+                    put("temperature", 0.15)
+                }
 
-        return httpClient.newCall(chatRequest).execute().use { response ->
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                val errMsg = try { JSONObject(body).getJSONObject("error").getString("message") } catch (e: Exception) { body }
-                throw IOException("OpenAI GPT refinement failed (${response.code}): $errMsg")
+                val chatRequest = Request.Builder()
+                    .url("https://api.openai.com/v1/chat/completions")
+                    .header("Authorization", "Bearer $cleanKey")
+                    .post(chatJson.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                httpClient.newCall(chatRequest).execute().use { response ->
+                    val body = response.body?.string() ?: ""
+                    if (!response.isSuccessful) {
+                        val errMsg = try {
+                            JSONObject(body).getJSONObject("error").getString("message")
+                        } catch (_: Exception) {
+                            body
+                        }
+                        throw IOException("OpenAI GPT ($modelName) failed (${response.code}): $errMsg")
+                    }
+                    val choices = JSONObject(body).getJSONArray("choices")
+                    val content = choices.getJSONObject(0).getJSONObject("message").getString("content").trim()
+                    if (content.isNotBlank()) {
+                        return parseUniversalOutput(content, targetLangName, targetLangCode, tone).copy(rawTranscript = rawTranscript)
+                    }
+                }
+            } catch (e: Exception) {
+                lastEx = e
             }
-            val choices = JSONObject(body).getJSONArray("choices")
-            val content = choices.getJSONObject(0).getJSONObject("message").getString("content").trim()
-            parseUniversalOutput(content, targetLangName, targetLangCode, tone).copy(rawTranscript = rawTranscript)
         }
+
+        throw (lastEx as? IOException) ?: IOException("OpenAI refinement failed: ${lastEx?.message}", lastEx)
+    }
+
+    private fun transcribeAudioWithGroqWhisper(
+        audioFile: File,
+        cleanKey: String,
+        sourceLangCode: String
+    ): String {
+        val whisperModels = listOf("whisper-large-v3-turbo", "whisper-large-v3")
+        var lastEx: Exception? = null
+
+        for (modelName in whisperModels) {
+            val includeLangAttempts = if (sourceLangCode.length == 2 && sourceLangCode != "auto") {
+                listOf(true, false)
+            } else {
+                listOf(false)
+            }
+            for (withLang in includeLangAttempts) {
+                try {
+                    val builder = MultipartBody.Builder()
+                        .setType(MultipartBody.FORM)
+                        .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/mp4".toMediaType()))
+                        .addFormDataPart("model", modelName)
+                        .addFormDataPart("response_format", "json")
+                    if (withLang) {
+                        builder.addFormDataPart("language", sourceLangCode.lowercase())
+                    }
+
+                    val whisperRequest = Request.Builder()
+                        .url("https://api.groq.com/openai/v1/audio/transcriptions")
+                        .header("Authorization", "Bearer $cleanKey")
+                        .post(builder.build())
+                        .build()
+
+                    httpClient.newCall(whisperRequest).execute().use { response ->
+                        val body = response.body?.string() ?: ""
+                        if (!response.isSuccessful) {
+                            val errMsg = try {
+                                JSONObject(body).getJSONObject("error").getString("message")
+                            } catch (_: Exception) {
+                                body
+                            }
+                            throw IOException("Groq Whisper $modelName (${response.code}): $errMsg")
+                        }
+                        val transcript = JSONObject(body).optString("text", "").trim()
+                        if (transcript.isNotBlank()) {
+                            return transcript
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastEx = e
+                }
+            }
+        }
+
+        throw (lastEx as? IOException) ?: IOException("Groq Whisper failed: ${lastEx?.message}", lastEx)
     }
 
     private fun callGroq(
         audioFile: File,
         apiKey: String,
+        sourceLangCode: String,
         sourceLangName: String,
         targetLangName: String,
         targetLangCode: String,
@@ -777,36 +1043,29 @@ class TranscriptionClient(private val context: Context) {
         removeFillers: Boolean,
         fixGrammar: Boolean
     ): TranscriptionResult {
-        if (apiKey.isEmpty()) {
-            throw IOException("Groq API key is missing. Please enter your Groq API key in Settings or switch to Gemini.")
+        val cleanKey = sanitizeApiKey(apiKey)
+        if (cleanKey.isEmpty()) {
+            throw IOException("Groq API key is missing. Tap 'Get API' to configure your Groq key.")
         }
 
-        val requestBody = MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/m4a".toMediaType()))
-            .addFormDataPart("model", "whisper-large-v3")
-            .build()
-
-        val whisperRequest = Request.Builder()
-            .url("https://api.groq.com/openai/v1/audio/transcriptions")
-            .header("Authorization", "Bearer $apiKey")
-            .post(requestBody)
-            .build()
-
-        val rawTranscript = httpClient.newCall(whisperRequest).execute().use { response ->
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                val errMsg = try { JSONObject(body).getJSONObject("error").getString("message") } catch (e: Exception) { body }
-                throw IOException("Groq Whisper failed (${response.code}): $errMsg")
-            }
-            JSONObject(body).optString("text", "").trim()
-        }
+        val rawTranscript = transcribeAudioWithGroqWhisper(audioFile, cleanKey, sourceLangCode)
 
         if (rawTranscript.isBlank()) {
             throw IOException("No speech detected by Groq Whisper. Please speak clearly into the mic.")
         }
 
-        return refineWithGroq(rawTranscript, apiKey, sourceLangName, targetLangName, targetLangCode, tone, removeFillers, fixGrammar)
+        return try {
+            refineWithGroq(rawTranscript, cleanKey, sourceLangName, targetLangName, targetLangCode, tone, removeFillers, fixGrammar)
+        } catch (e: Exception) {
+            Log.w("TranscriptionClient", "Groq Llama refinement failed, returning Whisper transcript: ${e.message}")
+            TranscriptionResult(
+                rawTranscript = rawTranscript,
+                refinedText = rawTranscript,
+                detectedLanguage = sourceLangName,
+                targetLanguage = targetLangName,
+                tone = tone
+            )
+        }
     }
 
     private fun refineWithGroq(
@@ -819,49 +1078,74 @@ class TranscriptionClient(private val context: Context) {
         removeFillers: Boolean,
         fixGrammar: Boolean
     ): TranscriptionResult {
+        val cleanKey = sanitizeApiKey(apiKey)
         val translationPrompt = if (targetLangCode == "original") {
-            "Keep the output in the same language as spoken."
+            "Keep the output in the same language as spoken. Do NOT translate."
         } else {
-            "Translate into $targetLangName."
+            "Translate the refined text into $targetLangName."
         }
 
-        val prompt = """
-            Refine this transcript into clean, professional text ('shikrito' style).
+        val systemPrompt = """
+            You are Kothon AI. Refine the user's spoken transcript into clean, polished text.
             Tone: $tone.
             Remove filler words: $removeFillers. Fix grammar: $fixGrammar.
             $translationPrompt
-            Raw Transcript: "$rawTranscript"
             Return strictly JSON: {"detected_language": "<Language>", "refined_text": "<Output text>"}
-            DO NOT return language arrays like {"English": ["..."]}. Return single string in "refined_text".
+            DO NOT return language arrays. Return a single string in "refined_text".
         """.trimIndent()
 
-        val chatJson = JSONObject().apply {
-            put("model", "llama-3.3-70b-versatile")
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", prompt)
-                })
-            })
-            put("temperature", 0.15)
-        }
+        val groqChatModels = listOf(
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "gemma2-9b-it"
+        )
+        var lastEx: Exception? = null
 
-        val chatRequest = Request.Builder()
-            .url("https://api.groq.com/openai/v1/chat/completions")
-            .header("Authorization", "Bearer $apiKey")
-            .post(chatJson.toString().toRequestBody("application/json".toMediaType()))
-            .build()
+        for (modelName in groqChatModels) {
+            try {
+                val chatJson = JSONObject().apply {
+                    put("model", modelName)
+                    put("messages", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("role", "system")
+                            put("content", systemPrompt)
+                        })
+                        put(JSONObject().apply {
+                            put("role", "user")
+                            put("content", rawTranscript)
+                        })
+                    })
+                    put("temperature", 0.15)
+                }
 
-        return httpClient.newCall(chatRequest).execute().use { response ->
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                val errMsg = try { JSONObject(body).getJSONObject("error").getString("message") } catch (e: Exception) { body }
-                throw IOException("Groq refinement failed (${response.code}): $errMsg")
+                val chatRequest = Request.Builder()
+                    .url("https://api.groq.com/openai/v1/chat/completions")
+                    .header("Authorization", "Bearer $cleanKey")
+                    .post(chatJson.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                httpClient.newCall(chatRequest).execute().use { response ->
+                    val body = response.body?.string() ?: ""
+                    if (!response.isSuccessful) {
+                        val errMsg = try {
+                            JSONObject(body).getJSONObject("error").getString("message")
+                        } catch (_: Exception) {
+                            body
+                        }
+                        throw IOException("Groq refinement ($modelName) failed (${response.code}): $errMsg")
+                    }
+                    val choices = JSONObject(body).getJSONArray("choices")
+                    val content = choices.getJSONObject(0).getJSONObject("message").getString("content").trim()
+                    if (content.isNotBlank()) {
+                        return parseUniversalOutput(content, targetLangName, targetLangCode, tone).copy(rawTranscript = rawTranscript)
+                    }
+                }
+            } catch (e: Exception) {
+                lastEx = e
             }
-            val choices = JSONObject(body).getJSONArray("choices")
-            val content = choices.getJSONObject(0).getJSONObject("message").getString("content").trim()
-            parseUniversalOutput(content, targetLangName, targetLangCode, tone).copy(rawTranscript = rawTranscript)
         }
+
+        throw (lastEx as? IOException) ?: IOException("Groq refinement failed: ${lastEx?.message}", lastEx)
     }
 
     /**
@@ -880,14 +1164,25 @@ class TranscriptionClient(private val context: Context) {
         val clean = rawOutput.replace("```json", "").replace("```", "").trim()
 
         try {
-            if (clean.startsWith("{") && clean.endsWith("}")) {
-                val json = JSONObject(clean)
+            val jsonCandidate = if (clean.startsWith("{") && clean.endsWith("}")) {
+                clean
+            } else {
+                val firstBrace = clean.indexOf('{')
+                val lastBrace = clean.lastIndexOf('}')
+                if (firstBrace >= 0 && lastBrace > firstBrace) {
+                    clean.substring(firstBrace, lastBrace + 1)
+                } else {
+                    ""
+                }
+            }
 
-                var detected = json.optString("detected_language", "Auto")
-                var raw = json.optString("raw_transcript", "")
+            if (jsonCandidate.isNotEmpty()) {
+                val json = JSONObject(jsonCandidate)
+
+                val detected = json.optString("detected_language", "Auto")
+                val raw = json.optString("raw_transcript", "")
                 var refined = ""
 
-                // 1. Check if user wants English
                 val isEnglishTarget = targetLangCode.equals("en", ignoreCase = true) || targetLangName.contains("English", ignoreCase = true)
                 val isBengaliTarget = targetLangCode.equals("bn", ignoreCase = true) || targetLangName.contains("Bengali", ignoreCase = true)
 
@@ -910,7 +1205,6 @@ class TranscriptionClient(private val context: Context) {
                     refined = extractStringOrArray(json, "translation")
                 }
 
-                // If still empty, check any key's value that isn't detected_language / raw_transcript
                 if (refined.isBlank()) {
                     val keys = json.keys()
                     while (keys.hasNext()) {
@@ -939,7 +1233,6 @@ class TranscriptionClient(private val context: Context) {
             Log.w("TranscriptionClient", "JSON parse error, falling back to regex clean", e)
         }
 
-        // Regex fallback: if text contains {"English": ["..."]}
         val englishMatch = Regex(""""English"\s*:\s*\[\s*"([^"]+)"\s*\]""").find(clean)
         val bengaliMatch = Regex(""""Bengali"\s*:\s*\[\s*"([^"]+)"\s*\]""").find(clean)
 
@@ -961,17 +1254,16 @@ class TranscriptionClient(private val context: Context) {
             )
         }
 
-        // Clean any lingering JSON syntax
         val plainText = clean
             .replace(Regex("""^\{.*?"refined_text"\s*:\s*""""), "")
-            .replace(Regex("""^\{.*?"(English|Bengali)"\s*:\s*\[?"?"""), "")
-            .replace(Regex("""["\]\}]+$"""), "")
+            .replace(Regex(""""\s*\}$"""), "")
             .trim()
+            .removeSurrounding("\"")
 
         return TranscriptionResult(
             rawTranscript = "",
-            refinedText = if (plainText.isNotBlank()) plainText else clean,
-            detectedLanguage = "Detected",
+            refinedText = plainText.ifBlank { clean },
+            detectedLanguage = "Auto",
             targetLanguage = targetLangName,
             tone = tone
         )
@@ -979,17 +1271,30 @@ class TranscriptionClient(private val context: Context) {
 
     private fun extractStringOrArray(json: JSONObject, key: String): String {
         if (!json.has(key)) return ""
-        val obj = json.get(key)
-        return when (obj) {
-            is JSONArray -> {
-                val list = mutableListOf<String>()
-                for (i in 0 until obj.length()) {
-                    list.add(obj.optString(i, ""))
+        val arr = json.optJSONArray(key)
+        if (arr != null && arr.length() > 0) {
+            val sb = StringBuilder()
+            for (i in 0 until arr.length()) {
+                val item = arr.optString(i, "").trim()
+                if (item.isNotBlank()) {
+                    if (sb.isNotEmpty()) sb.append(" ")
+                    sb.append(item)
                 }
-                list.filter { it.isNotBlank() }.joinToString(" ")
             }
-            is String -> obj.trim()
-            else -> obj.toString().trim()
+            return sb.toString()
+        }
+        return json.optString(key, "").trim()
+    }
+
+    companion object {
+        fun getProviderApiUrl(provider: String): String {
+            return when (provider) {
+                KothonPreferences.PROVIDER_GEMINI -> "https://aistudio.google.com/app/apikey"
+                KothonPreferences.PROVIDER_GROQ -> "https://console.groq.com/keys"
+                KothonPreferences.PROVIDER_OPENAI -> "https://platform.openai.com/api-keys"
+                KothonPreferences.PROVIDER_NVIDIA -> "https://build.nvidia.com/settings/api-keys"
+                else -> "https://aistudio.google.com/app/apikey"
+            }
         }
     }
 }

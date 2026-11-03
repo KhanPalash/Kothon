@@ -22,7 +22,8 @@ class KothonPreferences(context: Context) {
     }
 
     fun setApiKeyForProvider(providerName: String, key: String) {
-        val encrypted = KeyStoreHelper.encrypt(key.trim())
+        val clean = key.trim().removePrefix("Bearer ").removePrefix("bearer ").trim()
+        val encrypted = KeyStoreHelper.encrypt(clean)
         prefs.edit()
             .putString("key_api_key_$providerName", encrypted)
             .apply()

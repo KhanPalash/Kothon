@@ -245,4 +245,19 @@ class KothonIntegrationTest {
         assertEquals(45_000L, reloaded.liveSessionMaxMs)
         assertTrue(reloaded.liveDictationEnabled)
     }
+
+    @Test
+    fun `provider api key urls point to official portals for all providers`() {
+        assertTrue(TranscriptionClient.getProviderApiUrl(KothonPreferences.PROVIDER_GEMINI).contains("aistudio.google.com"))
+        assertTrue(TranscriptionClient.getProviderApiUrl(KothonPreferences.PROVIDER_GROQ).contains("console.groq.com"))
+        assertTrue(TranscriptionClient.getProviderApiUrl(KothonPreferences.PROVIDER_OPENAI).contains("platform.openai.com"))
+        assertTrue(TranscriptionClient.getProviderApiUrl(KothonPreferences.PROVIDER_NVIDIA).contains("build.nvidia.com"))
+    }
+
+    @Test
+    fun `sanitizeApiKey strips Bearer prefix and quotes cleanly`() {
+        assertEquals("gsk_12345", transcriptionClient.sanitizeApiKey("  Bearer gsk_12345 \n"))
+        assertEquals("sk-abcde", transcriptionClient.sanitizeApiKey("\"sk-abcde\""))
+        assertEquals("nvapi-xyz", transcriptionClient.sanitizeApiKey("bearer nvapi-xyz"))
+    }
 }

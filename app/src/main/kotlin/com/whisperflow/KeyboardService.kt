@@ -3,29 +3,26 @@ package com.whisperflow
 import android.content.Context
 import android.content.Intent
 import android.inputmethodservice.InputMethodService
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.Window
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -37,8 +34,9 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import com.whisperflow.api.TranscriptionClient
+import com.example.MainActivity
 import com.example.R
+import com.whisperflow.api.TranscriptionClient
 import com.whisperflow.audio.AndroidSpeechSession
 import com.whisperflow.audio.DeviceSpikeValidator
 import com.whisperflow.audio.DictationState
@@ -49,7 +47,6 @@ import com.whisperflow.audio.PasswordFieldDetector
 import com.whisperflow.audio.PermissionHelper
 import com.whisperflow.audio.Recorder
 import com.whisperflow.settings.KothonPreferences
-import com.whisperflow.settings.SettingsActivity
 import com.whisperflow.ui.StandardKeyboardView
 import com.whisperflow.ui.VoiceButton
 import com.whisperflow.ui.VoiceButtonState
@@ -61,7 +58,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -117,6 +113,11 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     private val _modeLabel = MutableStateFlow("ACCURATE")
     val modeLabel = _modeLabel.asStateFlow()
 
+    private val _sourceLangCode = MutableStateFlow("auto")
+    private val _targetLangCode = MutableStateFlow("en")
+    private val _currentTone = MutableStateFlow(KothonPreferences.TONE_PROFESSIONAL)
+    private val _currentProvider = MutableStateFlow(KothonPreferences.PROVIDER_GEMINI)
+
     override fun onCreate() {
         super.onCreate()
         savedStateRegistryController.performRestore(null)
@@ -149,6 +150,8 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
             }
         )
 
+        syncPreferenceFlows()
+
         serviceScope.launch {
             liveController.uiState.collect { ui ->
                 when (ui.state) {
@@ -164,7 +167,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                     DictationState.REFINING -> {
                         _amplitude.value = 0f
                         _buttonState.value = VoiceButtonState.PROCESSING
-                        _statusMessage.value = "Polishing with AI…"
+                        _statusMessage.value = "Polishing with ${preferences.provider}…"
                     }
                     DictationState.DONE -> {
                         _amplitude.value = 0f
@@ -199,6 +202,14 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                 }
             }
         }
+    }
+
+    private fun syncPreferenceFlows() {
+        _sourceLangCode.value = preferences.sourceLanguage
+        _targetLangCode.value = preferences.targetLanguage
+        _currentTone.value = preferences.tone
+        _currentProvider.value = preferences.provider
+        _modeLabel.value = if (LiveDictationSupport.isLiveModeEnabled(preferences)) "LIVE" else "ACCURATE"
     }
 
     override fun onConfigureWindow(win: Window, isFullscreen: Boolean, isCandidatesOnly: Boolean) {
@@ -246,20 +257,24 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                 val undoAvailable by _canUndo.collectAsState()
                 val refineAvailable by _canRefine.collectAsState()
                 val mode by _modeLabel.collectAsState()
+                val srcLang by _sourceLangCode.collectAsState()
+                val tgtLang by _targetLangCode.collectAsState()
+                val activeTone by _currentTone.collectAsState()
+                val activeProvider by _currentProvider.collectAsState()
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF0B0F19))
+                        .background(Color(0xFF090D16))
                 ) {
                     Image(
                         painter = painterResource(R.drawable.brand_logo),
                         contentDescription = null,
-                        alpha = 0.30f,
+                        alpha = 0.22f,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .matchParentSize()
-                            .padding(horizontal = 64.dp, vertical = 16.dp)
+                            .padding(horizontal = 64.dp, vertical = 14.dp)
                     )
 
                     if (fallback) {
@@ -275,6 +290,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                             },
                             onSwitchToVoice = {
                                 _isFallbackKeyboard.value = false
+                                syncPreferenceFlows()
                                 checkAndRefreshPermission()
                             },
                             onSwitchIme = {
@@ -286,10 +302,11 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                             state = state,
                             amplitude = amp,
                             statusMessage = msg,
-                            sourceLanguageCode = preferences.sourceLanguage,
-                            targetLanguageCode = preferences.targetLanguage,
-                            tone = preferences.tone,
+                            sourceLanguageCode = srcLang,
+                            targetLanguageCode = tgtLang,
+                            tone = activeTone,
                             modeLabel = mode,
+                            providerName = activeProvider,
                             voiceDisabled = disabled,
                             canUndo = undoAvailable,
                             canRefine = refineAvailable,
@@ -306,9 +323,9 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                                 refineLiveNow()
                             },
                             onToggleLanguages = {
-                                // Fast toggle between English and Original (or Bengali)
                                 val newTarget = if (preferences.targetLanguage == "en") "original" else "en"
                                 preferences.targetLanguage = newTarget
+                                _targetLangCode.value = newTarget
                                 _statusMessage.value = "Target: ${if (newTarget == "en") "English" else "Original Language"}"
                             },
                             onCycleTone = {
@@ -316,6 +333,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                                 val idx = (tones.indexOf(preferences.tone) + 1) % tones.size
                                 val nextTone = tones[idx]
                                 preferences.tone = nextTone
+                                _currentTone.value = nextTone
                                 _statusMessage.value = "Tone: $nextTone"
                             },
                             onSwitchToKeyboard = {
@@ -343,12 +361,14 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
         stopAmplitudePolling()
         _canUndo.value = false
         _canRefine.value = false
+        syncPreferenceFlows()
         refreshEditorState(info)
         checkAndRefreshPermission()
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        syncPreferenceFlows()
         refreshEditorState(info)
         checkAndRefreshPermission()
     }
@@ -373,8 +393,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
         currentEditorInfo = info
         val passwordField = PasswordFieldDetector.shouldDisableVoice(info)
         _voiceDisabled.value = passwordField
-        _modeLabel.value =
-            if (LiveDictationSupport.isLiveModeEnabled(preferences)) "LIVE" else "ACCURATE"
+        syncPreferenceFlows()
 
         if (passwordField) {
             cancelActiveDictation()
@@ -421,6 +440,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     }
 
     fun startVoiceRecording() {
+        syncPreferenceFlows()
         if (_voiceDisabled.value) {
             _statusMessage.value = "Voice disabled for password fields."
             return
@@ -513,8 +533,9 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
     }
 
     private fun processAccurateAudio(file: File) {
+        val activeProvider = preferences.provider
         _buttonState.value = VoiceButtonState.PROCESSING
-        _statusMessage.value = "Transcribing with AI…"
+        _statusMessage.value = "Transcribing with $activeProvider…"
 
         serviceScope.launch {
             try {
@@ -533,7 +554,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                 if (text.isNotBlank() && conn != null) {
                     conn.commitText(text, 1)
                     _buttonState.value = VoiceButtonState.SUCCESS
-                    _statusMessage.value = "Inserted refined text."
+                    _statusMessage.value = "Inserted refined text ($activeProvider)."
                 } else {
                     _buttonState.value = VoiceButtonState.IDLE
                     _statusMessage.value = "No text returned."
@@ -541,10 +562,10 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
             } catch (e: Exception) {
                 Log.w("KeyboardService", "ACCURATE transcription failed: ${e.message}")
                 _buttonState.value = VoiceButtonState.ERROR
-                _statusMessage.value = "Transcription failed. Check API key or network."
+                _statusMessage.value = e.message ?: "Transcription failed. Check $activeProvider API key or network."
             } finally {
                 file.delete()
-                delay(2500)
+                delay(3200)
                 if (_buttonState.value == VoiceButtonState.SUCCESS ||
                     _buttonState.value == VoiceButtonState.ERROR
                 ) {
@@ -571,7 +592,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
             while (isActive && recorder.isRecording) {
                 val maxAmp = recorder.getMaxAmplitude()
                 _amplitude.value = (maxAmp / 32767f).coerceIn(0f, 1f)
-                delay(80)
+                delay(100)
             }
             _amplitude.value = 0f
         }
@@ -598,12 +619,12 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
 
     private fun openSettings() {
         try {
-            val intent = Intent(this, SettingsActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
             startActivity(intent)
         } catch (e: Exception) {
-            Log.e("KeyboardService", "Could not start SettingsActivity", e)
+            Log.e("KeyboardService", "Could not start MainActivity", e)
         }
     }
 
