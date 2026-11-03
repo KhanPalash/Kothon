@@ -17,6 +17,7 @@ class AndroidSpeechSession(private val context: Context) : SpeechSession {
 
     private val handler = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
+    private var prewarmedRecognizer: SpeechRecognizer? = null
     private var listener: SpeechSession.Listener? = null
     private var config: SpeechConfig? = null
 
@@ -99,10 +100,9 @@ class AndroidSpeechSession(private val context: Context) : SpeechSession {
         sessionActive = false
         handler.removeCallbacks(sessionTimerRunnable)
         recognizer?.stopListening()
-        handler.postDelayed({
-            destroyRecognizer()
-            listener?.onEnd()
-        }, STOP_WAIT_MS)
+        // Called on main thread, no need for postDelayed
+        destroyRecognizer()
+        listener?.onEnd()
     }
 
     override fun destroy() {
@@ -111,11 +111,44 @@ class AndroidSpeechSession(private val context: Context) : SpeechSession {
         handler.removeCallbacks(watchdogRunnable)
         handler.removeCallbacks(sessionTimerRunnable)
         destroyRecognizer()
+        destroyPrewarmedRecognizer()
+    }
+
+    /**
+     * Pre-warm the SpeechRecognizer to eliminate cold-start latency.
+     * Creates a recognizer instance that will be reused on first start().
+     */
+    fun prewarm() {
+        if (prewarmedRecognizer != null) return
+        try {
+            val rec = SpeechRecognizer.createSpeechRecognizer(context)
+            prewarmedRecognizer = rec
+            Log.i(TAG, "SpeechRecognizer prewarmed")
+        } catch (e: Exception) {
+            Log.w(TAG, "Prewarm failed: ${e.message}")
+        }
+    }
+
+    private fun destroyPrewarmedRecognizer() {
+        val rec = prewarmedRecognizer
+        prewarmedRecognizer = null
+        try {
+            rec?.destroy()
+        } catch (e: Exception) {
+            Log.w(TAG, "Prewarmed recognizer destroy error: ${e.message}")
+        }
     }
 
     private fun createAndStart(cfg: SpeechConfig) {
         destroyRecognizer()
-        val rec = createRecognizer(cfg)
+        // Reuse prewarmed recognizer if available and compatible
+        val rec = if (prewarmedRecognizer != null) {
+            val r = prewarmedRecognizer!!
+            prewarmedRecognizer = null
+            r
+        } else {
+            createRecognizer(cfg)
+        }
         recognizer = rec
         rec.setRecognitionListener(recognitionListener)
         rec.startListening(buildIntent(cfg))
@@ -140,6 +173,9 @@ class AndroidSpeechSession(private val context: Context) : SpeechSession {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, cfg.partialResults)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, cfg.languageTag)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, cfg.completeSilenceMs)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, cfg.minSpeechLengthMs)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, cfg.possiblyCompleteSilenceMs)
         }
     }
 

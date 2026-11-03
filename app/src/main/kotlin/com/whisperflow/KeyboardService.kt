@@ -12,10 +12,18 @@ import android.view.Window
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.Lifecycle
@@ -30,6 +38,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.whisperflow.api.TranscriptionClient
+import com.example.R
 import com.whisperflow.audio.AndroidSpeechSession
 import com.whisperflow.audio.DeviceSpikeValidator
 import com.whisperflow.audio.DictationState
@@ -117,6 +126,7 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
         recorder = Recorder(this)
         transcriptionClient = TranscriptionClient(this)
         speechSession = AndroidSpeechSession(this)
+        speechSession.prewarm()
         dictationEditor = ImeDictationEditor(
             connection = { currentInputConnection },
             editorInfo = { currentEditorInfo },
@@ -237,7 +247,21 @@ class KeyboardService : InputMethodService(), LifecycleOwner, ViewModelStoreOwne
                 val refineAvailable by _canRefine.collectAsState()
                 val mode by _modeLabel.collectAsState()
 
-                Box(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF0B0F19))
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.brand_logo),
+                        contentDescription = null,
+                        alpha = 0.30f,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .matchParentSize()
+                            .padding(horizontal = 64.dp, vertical = 16.dp)
+                    )
+
                     if (fallback) {
                         StandardKeyboardView(
                             onKeyChar = { char ->

@@ -18,5 +18,8 @@ data class SpeechConfig(
     val languageTag: String,
     val preferOnDevice: Boolean,
     val partialResults: Boolean = true,
-    val maxSessionMs: Long = 5 * 60_000
+    val maxSessionMs: Long = 5 * 60_000,
+    val completeSilenceMs: Long = 600,
+    val minSpeechLengthMs: Long = 300,
+    val possiblyCompleteSilenceMs: Long = 300
 )
