@@ -86,6 +86,10 @@
 <td align="center"><img src="public/assets/aistudio/Screenshot_20261103-133758_56db828b.png" width="300" alt="Kothon Studio Screen" /><br/>Dictation Studio</td>
 <td align="center"><img src="public/assets/aistudio/Screenshot_20261101-185847_71e84f32.png" width="300" alt="Keyboard View" /><br/>Keyboard IME</td>
 </tr>
+<tr>
+<td align="center"><img src="public/assets/aistudio/Screenshot_20261103-133758_56db828b.png" width="300" alt="Studio Detail" /><br/>Studio Detail</td>
+<td align="center"><img src="public/assets/aistudio/Screenshot_20261101-185847_71e84f32.png" width="300" alt="Keyboard Detail" /><br/>Keyboard Detail</td>
+</tr>
 </table>
 </div>
 
