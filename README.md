@@ -88,7 +88,7 @@
 </tr>
 <tr>
 <td align="center"><img src="public/assets/aistudio/pics/IMG_20261104_162829.jpg" width="300" alt="Studio Detail" /><br/>Studio Detail</td>
-<td align="center"><img src="public/assets/aistudio/Screenshot_20261103-133758_56db828b.png" width="300" alt="Keyboard Detail" /><br/>Keyboard Detail</td>
+<td align="center"><img src="public/assets/aistudio/pics/Screenshot_20261104-162712.png" width="300" alt="Keyboard Detail" /><br/>Keyboard Detail</td>
 </tr>
 </table>
 </div>
